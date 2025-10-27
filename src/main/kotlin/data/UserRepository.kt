@@ -35,7 +35,7 @@ object UserRepository {
             UserRecord(
                 discordId = it[UserTable.discordId],
                 accountId = it[UserTable.accountId],
-                discordUser = it[UserTable.discordId],
+                discordUser = it[UserTable.discordUser],
                 lastMatchId = it[UserTable.lastMatchId],
                 channelId = it[UserTable.channelId]
             )
