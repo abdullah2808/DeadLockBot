@@ -5,7 +5,6 @@ import data.DatabaseFactory
 import dev.kord.core.Kord
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import org.example.util.Env
 
 suspend fun main() = coroutineScope {
     DatabaseFactory.init()
