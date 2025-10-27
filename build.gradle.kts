@@ -1,15 +1,18 @@
 plugins {
+    application
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.serialization") version "2.0.0"
 }
 
+application {
+    mainClass.set("MainKt")
+}
 group = "org.deadlockbot"
 version = "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
 }
-
 dependencies {
     implementation("dev.kord:kord-core:0.10.0")
     implementation("io.ktor:ktor-client-core:3.0.0")
