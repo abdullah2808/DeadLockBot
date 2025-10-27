@@ -6,7 +6,12 @@ import org.jetbrains.exposed.sql.transactions.transaction
 
 object DatabaseFactory {
     fun init() {
-        Database.connect("", driver = "org.sqllite.jdbc")
+        Database.connect(
+                url = Env.DB_URL,
+                driver = "org.postgresql.Driver",
+                user = Env.DB_USER,
+                password = Env.DB_PASSWORD
+        )
         transaction {
             SchemaUtils.create(UserTable)
         }

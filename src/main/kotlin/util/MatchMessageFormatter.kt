@@ -4,8 +4,8 @@ import models.HeroRepository
 import models.MatchResultDTO
 import kotlin.time.Duration.Companion.seconds
 
-object MatchFormatter {
-    fun format(match: MatchResultDTO): String {
+object MatchMessageFormatter {
+    fun format(match: MatchResultDTO, userName: String?): String {
         val duration = match.matchDurationSeconds.seconds
         val minutes = duration.inWholeMinutes
         val seconds = duration.inWholeSeconds % 60
@@ -18,10 +18,10 @@ object MatchFormatter {
         }
 
         return buildString {
-            appendLine("🎮 **${match.username ?: "Player"}** finished a match!")
+            appendLine("🎮 **${userName ?: "Player"}** finished a match!")
             appendLine("Hero: **$hero** (Lv ${match.heroLevel})")
             appendLine("K/D/A: **${match.kills}/${match.deaths}/${match.assists}**")
-            appendLine("Net Worth: **${match.netWorth}**")
+            appendLine("Souls: **${match.netWorth}**")
             appendLine("Duration: **${minutes}m ${seconds}s**")
             appendLine("Result: $resultEmoji")
             appendLine("Match ID: `${match.matchId}`")

@@ -7,17 +7,39 @@ import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 
 object UserRepository {
-    fun addUser(discordId: String, accountId: String) = transaction {
+    data class UserRecord(
+        val discordId: String,
+        val accountId: String,
+        val discordUser: String,
+        val lastMatchId: String?,
+        val channelId: String?
+    )
+
+    fun addUser(discordId: String, accountId: String, channelId: String, discordUser: String) = transaction {
         if (UserTable.selectAll().where { UserTable.discordId eq discordId }.empty()) {
             UserTable.insert {
                 it[UserTable.discordId] = discordId
                 it[UserTable.accountId] = accountId
+                it[UserTable.discordUser] = discordUser
+                it[UserTable.channelId] = channelId
             }
         }
     }
 
     fun removeUser(discordId: String) = transaction {
-        UserTable.deleteWhere() { UserTable.discordId eq discordId }
+        UserTable.deleteWhere { UserTable.discordId eq discordId }
+    }
+
+    fun getAllUsers(): List<UserRecord> = transaction {
+        UserTable.selectAll().map {
+            UserRecord(
+                discordId = it[UserTable.discordId],
+                accountId = it[UserTable.accountId],
+                discordUser = it[UserTable.discordId],
+                lastMatchId = it[UserTable.lastMatchId],
+                channelId = it[UserTable.channelId]
+            )
+        }
     }
 
     fun updateLastMatch(accountId: String, matchId: String) = transaction {

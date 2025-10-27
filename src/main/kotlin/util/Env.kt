@@ -1,11 +1,27 @@
-package org.example.util
-
 import io.github.cdimascio.dotenv.dotenv
 
 object Env {
-    private val dotenv = dotenv()
+    private val dotenv = try {
+        dotenv()  // Loads from .env if available (for local dev)
+    } catch (e: Exception) {
+        null
+    }
 
-    val DISCORD_TOKEN = dotenv["DISCORD_TOKEN"] ?: error("Missing DISCORD_TOKEN")
-    val DEADLOCK_BASE_URL = dotenv["DEADLOCK_BASE_URL"] ?: "https://api.deadlock-api.com/v1"
-    val CHANNEL_ID = dotenv["CHANNEL_ID"] ?: error("Missing CHANNEL_ID")
+    // Discord token
+    val DISCORD_TOKEN: String = dotenv?.get("DISCORD_TOKEN")
+        ?: System.getenv("DISCORD_TOKEN")
+        ?: error("Missing DISCORD_TOKEN")
+
+    // Database
+    val DB_URL: String = dotenv?.get("DB_URL")
+        ?: System.getenv("DB_URL")
+        ?: error("Missing DB_URL")
+
+    val DB_USER: String = dotenv?.get("DB_USER")
+        ?: System.getenv("DB_USER")
+        ?: error("Missing DB_USER")
+
+    val DB_PASSWORD: String = dotenv?.get("DB_PASSWORD")
+        ?: System.getenv("DB_PASSWORD")
+        ?: error("Missing DB_PASSWORD")
 }

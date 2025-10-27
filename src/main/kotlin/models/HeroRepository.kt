@@ -13,7 +13,9 @@ data class Hero(
 object HeroRepository {
     private val heroMap: Map<Int, String> by lazy {
         val json = URL("https://assets.deadlock-api.com/v2/heroes").readText()
-        val heroes = Json.decodeFromString<List<Hero>>(json)
+        val heroes = Json {
+            ignoreUnknownKeys = true
+        }.decodeFromString<List<Hero>>(json)
         heroes.associate { it.id to it.name }
     }
 
