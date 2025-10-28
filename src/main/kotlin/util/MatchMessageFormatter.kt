@@ -19,10 +19,10 @@ object MatchMessageFormatter {
 
         return buildString {
             appendLine("🎮 **${userName ?: "Player"}** finished a match!")
-            appendLine("Hero: **$hero** (Lv ${match.heroLevel})")
-            appendLine("K/D/A: **${match.kills}/${match.deaths}/${match.assists}**")
-            appendLine("Souls: **${match.netWorth}**")
-            appendLine("Duration: **${minutes}m ${seconds}s**")
+            appendLine("**Hero**: $hero (Lv ${match.heroLevel})")
+            appendLine("**K/D/A**: ${match.kills}/${match.deaths}/${match.assists}")
+            appendLine("**Souls:** ${match.netWorth}")
+            appendLine("**Duration**: ${minutes}m ${seconds}s")
             appendLine("Result: $resultEmoji")
             appendLine("Match ID: `${match.matchId}`")
         }
