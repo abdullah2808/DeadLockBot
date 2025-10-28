@@ -23,8 +23,8 @@ object MatchMessageFormatter {
             appendLine("**K/D/A**: ${match.kills}/${match.deaths}/${match.assists}")
             appendLine("**Souls:** ${match.netWorth}")
             appendLine("**Duration**: ${minutes}m ${seconds}s")
-            appendLine("Result: $resultEmoji")
-            appendLine("Match ID: `${match.matchId}`")
+            appendLine("**Result:** $resultEmoji")
+            appendLine("**Match ID:** `${match.matchId}`")
         }
     }
 }
