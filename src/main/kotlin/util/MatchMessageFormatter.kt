@@ -12,8 +12,8 @@ object MatchMessageFormatter {
 
         val hero = HeroRepository.getHeroName(match.heroId)
         val resultEmoji = when {
-            match.matchResult == playerTeam -> "🏆 **Victory!**"
-            match.matchResult != playerTeam -> "💀 **Defeat**"
+            match.matchResult == match.playerTeam -> "🏆 **Victory!**"
+            match.matchResult != match.playerTeam -> "💀 **Defeat**"
             else -> "⚔️ **Unknown Outcome**"
         }
 
