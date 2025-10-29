@@ -11,9 +11,9 @@ object MatchMessageFormatter {
         val seconds = duration.inWholeSeconds % 60
 
         val hero = HeroRepository.getHeroName(match.heroId)
-        val resultEmoji = when (match.matchResult) {
-            1 -> "🏆 **Victory!**"
-            0 -> "💀 **Defeat**"
+        val resultEmoji = when {
+            match.matchResult == playerTeam -> "🏆 **Victory!**"
+            match.matchResult != playerTeam -> "💀 **Defeat**"
             else -> "⚔️ **Unknown Outcome**"
         }
 
