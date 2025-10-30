@@ -31,6 +31,16 @@ object MatchMessageGenerator {
         // Rank repo info
         val rankImage = RankRepository.getRankImage(match, additionalMatchInfo)
 
+        // Damage Info
+        val playerStats = additionalMatchInfo?.matchInfo?.players
+            ?.stream()
+            ?.filter { it.accountId == match.accountId }
+            ?.findFirst()
+            ?.get()
+            ?.stats
+        val playerDamage = playerStats?.get(playerStats.size - 1)?.playerDamage
+        val objectiveDamage = playerStats?.get(playerStats.size - 1)?.objectiveDamage
+
         // Result processing and message generation
         val resultEmoji : String
         val matchColor : Color
@@ -53,6 +63,12 @@ object MatchMessageGenerator {
             appendLine("**Hero**: $hero")
             appendLine("**K/D/A**: ${match.kills}/${match.deaths}/${match.assists}")
             appendLine("**Souls:** ${match.netWorth}")
+            playerDamage?.let {
+                appendLine("**Player Damage**: $playerDamage")
+            }
+            objectiveDamage?.let {
+                appendLine("**Objective Damage**: $objectiveDamage")
+            }
             appendLine("**Duration**: ${minutes}m ${seconds}s")
             appendLine()
         }
