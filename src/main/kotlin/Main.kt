@@ -6,6 +6,14 @@ import dev.kord.core.Kord
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
+/*
+ TODO:
+        1. Error handling for sign up
+        2. Return additional match info in response
+        3. Return "End Game Screen" Level details for match info
+        4. Integrate with Deadlock GC
+ */
+
 suspend fun main() = coroutineScope {
     DatabaseFactory.init()
     val kord = Kord(Env.DISCORD_TOKEN)
