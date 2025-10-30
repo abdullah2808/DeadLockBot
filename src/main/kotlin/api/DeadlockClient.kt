@@ -8,7 +8,8 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
-import models.MatchResultDTO
+import models.MatchDTO
+import models.MatchHistoryDTO
 
 class DeadlockClient() {
 
@@ -22,10 +23,16 @@ class DeadlockClient() {
         }
     }
 
-    suspend fun getRecentMatch(accountId: String): MatchResultDTO {
+    suspend fun getRecentMatch(accountId: String): MatchHistoryDTO {
         val url = "https://api.deadlock-api.com/v1/players/$accountId/match-history"
-        val matchResponse: List<MatchResultDTO> = client.get(url).body()
+        val matchResponse: List<MatchHistoryDTO> = client.get(url).body()
         return matchResponse[0]
+    }
+
+    suspend fun getMatchByMatchID(matchId: Long): MatchDTO {
+        val url = "https://api.deadlock-api.com/v1/matches/$matchId/metadata"
+        val matchResponse: MatchDTO = client.get(url).body()
+        return matchResponse
     }
 
     suspend fun close() {

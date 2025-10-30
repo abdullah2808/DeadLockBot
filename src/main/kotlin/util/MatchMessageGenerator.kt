@@ -5,24 +5,35 @@ import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.entity.channel.TextChannel
 import dev.kord.rest.builder.message.create.embed
 import models.HeroRepository
-import models.MatchResultDTO
+import models.MatchHistoryDTO
 import kotlin.time.Duration.Companion.seconds
-import kotlin.time.ExperimentalTime
 import kotlinx.datetime.Instant
+import models.MatchDTO
+import models.RankRepository
 
 object MatchMessageGenerator {
-    suspend fun generate(match: MatchResultDTO, userName: String?, channel: TextChannel?) {
+    suspend fun generate(
+        match: MatchHistoryDTO,
+        userName: String?,
+        channel: TextChannel?,
+        additionalMatchInfo: MatchDTO? )
+    {
+        // Time
         val duration = match.matchDurationSeconds.seconds
         val minutes = duration.inWholeMinutes
         val seconds = duration.inWholeSeconds % 60
         val startTimeInstant = Instant.fromEpochSeconds(match.startTime.toLong())
 
+        // Hero repo info
         val hero = HeroRepository.getHeroName(match.heroId)
         val thumbnailImage = HeroRepository.getHeroMinimapImage(match.heroId)
-        println(thumbnailImage)
+
+        // Rank repo info
+        val rankImage = RankRepository.getRankImage(match, additionalMatchInfo)
+
+        // Result processing and message generation
         val resultEmoji : String
         val matchColor : Color
-
          when  {
              match.matchResult == match.playerTeam -> {
                 resultEmoji = " **Won a Match!**  🏆🏆🏆"
@@ -56,6 +67,7 @@ object MatchMessageGenerator {
                 }
                 timestamp = startTimeInstant
                 footer {
+                    icon = rankImage
                     text = "Match ID: ${match.matchId}"
                 }
             }

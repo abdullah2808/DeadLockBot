@@ -2,17 +2,12 @@ package bot
 
 import api.DeadlockClient
 import data.UserRepository
-import dev.kord.common.Color
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
-import dev.kord.core.behavior.channel.createMessage
-import dev.kord.rest.builder.message.create.embed
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
-import models.MatchResultDTO
 import util.MatchMessageGenerator
-import kotlin.time.Clock
 
 suspend fun startScheduler(kord: Kord) = coroutineScope {
     launch {
@@ -25,9 +20,10 @@ suspend fun startScheduler(kord: Kord) = coroutineScope {
                     val channelIdSnowFlake: Snowflake = Snowflake(channelId!!)
 
                     if (latestMatch.matchId != lastMatchId?.toLong()) {
+                        val additionalMatchInfo = client.getMatchByMatchID(latestMatch.matchId)
                         UserRepository.updateLastMatch(accountId, latestMatch.matchId.toString())
                         val channel = kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(channelIdSnowFlake)
-                        MatchMessageGenerator.generate(latestMatch, discordUser, channel)
+                        MatchMessageGenerator.generate(latestMatch, discordUser, channel, additionalMatchInfo)
                     }
                 } catch (e: Exception) {
                     println("Error checking matches for $accountId: ${e.message}")

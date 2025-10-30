@@ -6,8 +6,6 @@ import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.on
 import data.UserRepository
-import dev.kord.common.entity.Snowflake
-import dev.kord.core.behavior.interaction.respondEphemeral
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.rest.builder.interaction.string
 import util.MatchMessageGenerator
@@ -57,10 +55,11 @@ private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, 
     val discordUser = interaction.user.globalName
     val client = DeadlockClient()
     val recentMatch = client.getRecentMatch(accountId)
+    val additionalMatchInfo = client.getMatchByMatchID(recentMatch.matchId)
     val channel = kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(
         channelId
     )
-    val message = MatchMessageGenerator.generate(recentMatch, discordUser, channel)
+    MatchMessageGenerator.generate(recentMatch, discordUser, channel, additionalMatchInfo)
     interaction.deferEphemeralResponse().respond {
         content = "✅ Fetched recent match for: `$accountId`."
     }

@@ -4,7 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class MatchResultDTO(
+data class MatchHistoryDTO(
     @SerialName("account_id") val accountId: Int,
     val denies: Int,
     @SerialName("game_mode") val gameMode: Int,
