@@ -4,7 +4,6 @@ package api
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.ClientRequestException
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.serialization.kotlinx.json.json
@@ -30,19 +29,11 @@ class DeadlockClient() {
         return matchResponse[0]
     }
 
-    suspend fun getMatchByMatchID(matchId: Long): MatchDTO?{
+    suspend fun getMatchByMatchID(matchId: Long): MatchDTO? {
         val url = "https://api.deadlock-api.com/v1/matches/$matchId/metadata"
         return try {
             client.get(url).body<MatchDTO>()
-        } catch (e: ClientRequestException) {
-            // 4xx errors like 404
-            if (e.response.status.value == 404) {
-                println("Match $matchId not found — returning null")
-                null
-            } else {
-                throw e
-            }
-        } catch (e: Exception) {
+        }  catch (e: Exception) {
             println("Error fetching match $matchId: ${e.message}")
             null
         }
