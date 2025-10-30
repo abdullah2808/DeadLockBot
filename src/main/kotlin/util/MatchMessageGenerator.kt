@@ -25,7 +25,7 @@ object MatchMessageGenerator {
 
          when  {
              match.matchResult == match.playerTeam -> {
-                resultEmoji = "**Won a Match!**  🏆🏆🏆"
+                resultEmoji = " **Won a Match!**  🏆🏆🏆"
                 matchColor = Color(0x1ABC9C)
             }
              match.matchResult != match.playerTeam  -> {
