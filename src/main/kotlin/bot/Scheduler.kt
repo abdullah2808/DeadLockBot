@@ -29,7 +29,7 @@ suspend fun startScheduler(kord: Kord) = coroutineScope {
                     println("Error checking matches for $accountId: ${e.message}")
                 }
             }
-            delay(3 * 60 * 1000L) // 3 minutes
+            delay(10 * 60 * 1000L) // 3 minutes
         }
     }
 }
