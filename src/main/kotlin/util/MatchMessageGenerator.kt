@@ -33,10 +33,7 @@ object MatchMessageGenerator {
 
         // Damage Info
         val playerStats = additionalMatchInfo?.matchInfo?.players
-            ?.stream()
-            ?.filter { it.accountId == match.accountId }
-            ?.findFirst()
-            ?.get()
+            ?.firstOrNull { it.accountId == match.accountId }
             ?.stats
         val playerDamage = playerStats?.get(playerStats.size - 1)?.playerDamage
         val objectiveDamage = playerStats?.get(playerStats.size - 1)?.objectiveDamage
