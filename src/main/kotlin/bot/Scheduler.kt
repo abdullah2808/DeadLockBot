@@ -24,7 +24,7 @@ suspend fun startScheduler(kord: Kord) = coroutineScope {
                         val channel = kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(channelIdSnowFlake)
                         MatchMessageGenerator.generate(latestMatch, discordUser, channel, additionalMatchInfo)
                     }
-                    delay(1500L)
+                    delay(6000L)
                 } catch (e: Exception) {
                     println("Error checking matches for $accountId: ${e.message}")
                 }
