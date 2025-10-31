@@ -29,19 +29,22 @@ class DeadlockClient() {
     }
 
     suspend fun getRecentMatch(accountId: String): MatchHistoryDTO {
-        val url = "https://api.deadlock-api.com/v1/players/$accountId/match-history"
+        var url = "https://api.deadlock-api.com/v1/players/$accountId/match-history"
         val maxRetries = 3
         val delayMillis = 10_000L // 10 seconds
 
         var lastError: Throwable? = null
-
+        // add a force refresh param on the last try
         repeat(maxRetries) { attempt ->
             try {
+                if (attempt == 2) {
+                    println("Forcing Refresh for: $accountId")
+                    url = "$url?force_refetch=true&"
+                }
                 val response: HttpResponse = client.get(url)
-
                 if (response.status == HttpStatusCode.TooManyRequests) {
                     // Handle rate limiting explicitly
-                    println("Received 429 Too Many Requests on attempt: ${attempt + 1} for: $accountId . Retrying...")
+                    println("Received 429 Too Many Requests on attempt: ${attempt + 1} for: $accountId ")
                 } else if (response.status.isSuccess()) {
                     val matchResponse: List<MatchHistoryDTO> = response.body()
                     if (matchResponse.isNotEmpty()) {
