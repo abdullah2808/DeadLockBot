@@ -39,7 +39,7 @@ class DeadlockClient() {
             try {
                 if (attempt == 2) {
                     println("Forcing Refresh for: $accountId")
-                    url = "$url?force_refetch=true&"
+                    url = "$url?force_refetch=true"
                 }
                 val response: HttpResponse = client.get(url)
                 if (response.status == HttpStatusCode.TooManyRequests) {
