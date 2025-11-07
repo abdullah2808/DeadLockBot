@@ -1,6 +1,7 @@
 package data
 
 
+import data.UserRepository.UserRecord
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.selectAll
@@ -40,6 +41,22 @@ object UserRepository {
                 channelId = it[UserTable.channelId]
             )
         }
+    }
+
+    fun selectUserByDiscordID(discordId: String): UserRecord? = transaction {
+        UserTable
+            .selectAll()
+            .where { UserTable.discordId eq discordId }
+            .map {
+                UserRecord(
+                    discordId = it[UserTable.discordId],
+                    accountId = it[UserTable.accountId],
+                    discordUser = it[UserTable.discordUser],
+                    lastMatchId = it[UserTable.lastMatchId],
+                    channelId = it[UserTable.channelId]
+                )
+            }
+            .singleOrNull()
     }
 
     fun updateLastMatch(accountId: String, matchId: String) = transaction {

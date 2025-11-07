@@ -6,6 +6,7 @@ import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.on
 import data.UserRepository
+import dev.kord.common.entity.Snowflake
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.rest.builder.interaction.string
 import util.MatchMessageGenerator
@@ -21,6 +22,9 @@ suspend fun registerCommands(kord: Kord) {
         string("account_id", "Your Deadlock account ID") { required = true }
     }
 
+    kord.createGlobalChatInputCommand("lastfive", "Get Your Last Five Matches") {
+    }
+
 }
 
 suspend fun handleCommands(kord: Kord) {
@@ -30,6 +34,7 @@ suspend fun handleCommands(kord: Kord) {
             "signup" -> handleSignup(interaction)
             "unsubscribe" -> handleUnsubscribe(interaction)
             "recentmatch" -> handleRecentMatch(interaction, kord)
+            "lastfive" -> handleLastFive(interaction, kord)
         }
     }
 }
@@ -54,12 +59,13 @@ private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, 
     val channelId = interaction.channelId
     val discordUser = interaction.user.globalName
     val client = DeadlockClient()
-    val recentMatch = client.getRecentMatch(accountId)
+    val recentMatch = client.getRecentMatch(accountId)[0]
+    client.close()
     val additionalMatchInfo = client.getMatchByMatchID(recentMatch.matchId)
     val channel = kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(
         channelId
     )
-    MatchMessageGenerator.generate(recentMatch, discordUser, channel, additionalMatchInfo)
+    MatchMessageGenerator.generateRecentMatch(recentMatch, discordUser, channel, additionalMatchInfo)
     interaction.deferEphemeralResponse().respond {
         content = "✅ Fetched recent match for: `$accountId`."
     }
@@ -70,5 +76,30 @@ private suspend fun handleUnsubscribe(interaction: ChatInputCommandInteraction) 
     UserRepository.removeUser(discordId)
     interaction.deferPublicResponse().respond {
         content = "❌ You’ve been unsubscribed from match tracking."
+    }
+}
+
+private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kord: Kord) {
+    val discordId = interaction.user.id.toString()
+    val user = UserRepository.selectUserByDiscordID(discordId)
+    if (user == null) {
+        interaction.deferEphemeralResponse().respond {
+            content = "User not registered, please register"
+        }
+        return
+    }
+
+    val client = DeadlockClient()
+    val channelIdSnowflake = Snowflake(user.channelId.toString())
+    val channel = kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(
+        channelIdSnowflake
+    )
+    val recentMatch = client.getRecentMatch(user.accountId)
+    client.close()
+
+    MatchMessageGenerator.generateLastFive(recentMatch, user.discordUser, channel)
+
+    interaction.deferEphemeralResponse().respond {
+        content = "✅ Fetching last five matches."
     }
 }

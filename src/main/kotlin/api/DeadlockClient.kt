@@ -28,7 +28,7 @@ class DeadlockClient() {
         }
     }
 
-    suspend fun getRecentMatch(accountId: String): MatchHistoryDTO {
+    suspend fun getRecentMatch(accountId: String): List<MatchHistoryDTO> {
         var url = "https://api.deadlock-api.com/v1/players/$accountId/match-history"
         val maxRetries = 3
         val delayMillis = 10_000L // 10 seconds
@@ -49,7 +49,7 @@ class DeadlockClient() {
                     val matchResponse: List<MatchHistoryDTO> = response.body()
                     if (matchResponse.isNotEmpty()) {
                         println("Got match for: $accountId")
-                        return matchResponse[0]
+                        return matchResponse
                     } else {
                         throw IllegalStateException("No matches found in the response for account $accountId.")
                     }

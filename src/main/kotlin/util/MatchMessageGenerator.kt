@@ -12,7 +12,7 @@ import models.MatchDTO
 import models.RankRepository
 
 object MatchMessageGenerator {
-    suspend fun generate(
+    suspend fun generateRecentMatch(
         match: MatchHistoryDTO,
         userName: String?,
         channel: TextChannel?,
@@ -83,6 +83,39 @@ object MatchMessageGenerator {
                     icon = rankImage
                     text = "Match ID: ${match.matchId}"
                 }
+            }
+        }
+    }
+
+    suspend fun generateLastFive(
+        matches: List<MatchHistoryDTO>,
+        userName: String?,
+        channel: TextChannel?, ) {
+        val topMatches = matches.take(5)
+
+        val messageDescription : String = buildString {
+            for (match in topMatches) {
+                val hero = HeroRepository.getHeroName(match.heroId)
+
+                val color = if (match.matchResult == match.playerTeam) "🟩" else "🟥"
+
+                val duration = match.matchDurationSeconds.seconds
+                val minutes = duration.inWholeMinutes
+                val seconds = duration.inWholeSeconds % 60
+
+
+                appendLine(
+                    "$color **$hero** — ${match.kills}/${match.deaths}/${match.assists}  |  " +
+                            "💰 ${match.netWorth}  |  🕒 ${minutes}m ${seconds}s"
+                )
+            }
+        }
+
+        channel?.createMessage {
+            embed {
+                title = "**${userName ?: "Player"}’s Last 5 Matches**"
+                description = messageDescription
+                color = Color(0x3498db)
             }
         }
     }

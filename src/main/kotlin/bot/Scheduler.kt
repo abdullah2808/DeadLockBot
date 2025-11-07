@@ -23,14 +23,14 @@ suspend fun startScheduler(kord: Kord) = coroutineScope {
                 try {
                     println("Getting recent match for: $accountId")
 
-                    val latestMatch = client.getRecentMatch(accountId)
+                    val latestMatch = client.getRecentMatch(accountId)[0]
                     val channelIdSnowflake = Snowflake(channelId!!)
 
                     if (latestMatch.matchId != lastMatchId?.toLong()) {
                         val additionalMatchInfo = client.getMatchByMatchID(latestMatch.matchId)
                         UserRepository.updateLastMatch(accountId, latestMatch.matchId.toString())
                         val channel = kord.getChannelOf<TextChannel>(channelIdSnowflake)
-                        MatchMessageGenerator.generate(latestMatch, discordUser, channel, additionalMatchInfo)
+                        MatchMessageGenerator.generateRecentMatch(latestMatch, discordUser, channel, additionalMatchInfo)
                     }
 
                     // Small stagger between launches to avoid overwhelming the API
