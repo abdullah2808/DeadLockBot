@@ -1,0 +1,25 @@
+---
+services:
+  db:
+    image: postgres:18.1
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_DB: main
+    volumes:
+      - deadlock_db_data:/var/lib/postgresql/data
+    ports:
+      - '54323:5432'
+
+  app:
+    build: .
+    depends_on:
+      - db
+    environment:
+      DB_URL: ${DB_URL}
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASS}
+
+volumes:
+  deadlock_db_data:
