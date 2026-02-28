@@ -75,8 +75,10 @@ object MatchMessageGenerator {
                 title = "**${userName ?: "Player"}**" + resultEmoji
                 description = messageDescription
                 color = matchColor
-                thumbnail {
-                    url = thumbnailImage.toString()
+                thumbnailImage?.let { imageUrl ->
+                    thumbnail {
+                        url = imageUrl
+                    }
                 }
                 timestamp = startTimeInstant
                 footer {
