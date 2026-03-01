@@ -33,7 +33,7 @@ object RankRepository {
         val avgTeamRank: Int
         when (matchHistory.playerTeam) {
             1 -> avgTeamRank = additionalMatchInfo?.matchInfo?.averageBadgeTeam1 ?: 0
-            0 -> avgTeamRank = additionalMatchInfo?.matchInfo?.averageBadgeTeam1 ?: 0
+            0 -> avgTeamRank = additionalMatchInfo?.matchInfo?.averageBadgeTeam0 ?: 0
             else -> avgTeamRank = 0
         }
         val tier = avgTeamRank / 10
