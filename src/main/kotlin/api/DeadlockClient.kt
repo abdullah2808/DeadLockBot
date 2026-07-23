@@ -73,6 +73,41 @@ class DeadlockClient() {
         )
     }
 
+    /**
+     * Lightweight account check used during signup. Returns the player's match
+     * history when the account can be resolved, an empty list when the account
+     * is valid but has no matches yet, or null when the account can't be
+     * verified (not found, or a transient error after a quick retry).
+     */
+    suspend fun verifyAccount(accountId: String): List<MatchHistoryDTO>? {
+        val url = "https://api.deadlock-api.com/v1/players/$accountId/match-history"
+        val maxAttempts = 2
+
+        repeat(maxAttempts) { attempt ->
+            try {
+                val response: HttpResponse = client.get(url)
+                when {
+                    response.status.isSuccess() -> return response.body()
+                    response.status == HttpStatusCode.NotFound ||
+                        response.status == HttpStatusCode.BadRequest -> {
+                        // Account genuinely doesn't resolve — no point retrying.
+                        println("Account $accountId not found (${response.status}).")
+                        return null
+                    }
+                    response.status == HttpStatusCode.TooManyRequests ->
+                        println("429 verifying $accountId on attempt ${attempt + 1}.")
+                    else ->
+                        println("Unexpected ${response.status} verifying $accountId.")
+                }
+            } catch (e: Exception) {
+                println("Verify attempt ${attempt + 1} for $accountId failed: ${e.message}")
+            }
+
+            if (attempt < maxAttempts - 1) delay(3_000L)
+        }
+        return null
+    }
+
     suspend fun getMatchByMatchID(matchId: Long): MatchDTO? {
         val url = "https://api.deadlock-api.com/v1/matches/$matchId/metadata"
         return try {

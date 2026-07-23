@@ -3,7 +3,9 @@ package util
 import dev.kord.common.Color
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.entity.channel.TextChannel
+import dev.kord.rest.builder.message.EmbedBuilder
 import dev.kord.rest.builder.message.create.embed
+import data.UserRepository
 import models.HeroRepository
 import models.MatchHistoryDTO
 import kotlin.time.Duration.Companion.seconds
@@ -12,6 +14,61 @@ import models.MatchDTO
 import models.RankRepository
 
 object MatchMessageGenerator {
+
+    /**
+     * Builds the embed shown when a player signs up. Confirms what was linked,
+     * previews their most recent match when available, and explains what the
+     * bot will do next. Returned as an [EmbedBuilder] so it can be attached to
+     * the slash-command interaction response.
+     */
+    fun buildWelcomeEmbed(
+        userName: String?,
+        accountId: String,
+        recentMatch: MatchHistoryDTO?,
+        outcome: UserRepository.SignupOutcome
+    ): EmbedBuilder {
+        val name = userName ?: "Player"
+        val (headline, intro) = when (outcome) {
+            UserRepository.SignupOutcome.REGISTERED ->
+                "🎉 Welcome, $name!" to "You're all set up for automatic Deadlock match tracking."
+            UserRepository.SignupOutcome.UPDATED ->
+                "🔄 Account updated, $name" to "I've relinked your Deadlock account and tracking channel."
+            UserRepository.SignupOutcome.ALREADY_REGISTERED ->
+                "ℹ️ Already tracking you, $name" to "This account is already linked here — nothing to change."
+        }
+
+        return EmbedBuilder().apply {
+            title = headline
+            color = Color(0x1ABC9C)
+            description = buildString {
+                appendLine(intro)
+                appendLine()
+                appendLine("**Linked account:** `$accountId`")
+                if (recentMatch != null) {
+                    val hero = HeroRepository.getHeroName(recentMatch.heroId)
+                    val result = if (recentMatch.matchResult == recentMatch.playerTeam) "🟩 Win" else "🟥 Loss"
+                    appendLine(
+                        "**Most recent match:** $result as **$hero** " +
+                            "(${recentMatch.kills}/${recentMatch.deaths}/${recentMatch.assists})"
+                    )
+                } else {
+                    appendLine("_No matches found yet — I'll post your next one automatically._")
+                }
+                appendLine()
+                appendLine("**What happens next**")
+                appendLine("• I'll post each new match in this channel as you play.")
+                appendLine("• Use `/lastfive` to review your recent games.")
+                appendLine("• Use `/unsubscribe` to stop tracking anytime.")
+            }
+            recentMatch?.let { match ->
+                HeroRepository.getHeroMinimapImage(match.heroId)?.let { imageUrl ->
+                    thumbnail { url = imageUrl }
+                }
+            }
+            footer { text = "Deadlock match tracking" }
+        }
+    }
+
     suspend fun generateRecentMatch(
         match: MatchHistoryDTO,
         userName: String?,

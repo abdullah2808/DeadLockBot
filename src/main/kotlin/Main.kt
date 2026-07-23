@@ -8,7 +8,7 @@ import kotlinx.coroutines.launch
 
 /*
  TODO:
-        1. Error handling for sign up
+        1. [done] Error handling + account verification for sign up
         2. Return additional match info in response
         3. Return "End Game Screen" Level details for match info
         4. Integrate with Deadlock GC
