@@ -74,14 +74,22 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction) {
         return
     }
 
-    // 3. Register (or update) the user, and 4. reply with a rich welcome embed.
-    val outcome = UserRepository.addUser(discordId, accountId, channelId, discordUser)
-    val recentMatch = matches.firstOrNull()
-
-    response.respond {
-        embeds = mutableListOf(
-            MatchMessageGenerator.buildWelcomeEmbed(discordUser, accountId, recentMatch, outcome)
-        )
+    // 3. Register the user and respond based on the outcome.
+    when (UserRepository.addUser(discordId, accountId, channelId, discordUser)) {
+        UserRepository.SignupOutcome.REGISTERED -> {
+            val recentMatch = matches.firstOrNull()
+            response.respond {
+                embeds = mutableListOf(
+                    MatchMessageGenerator.buildWelcomeEmbed(discordUser, accountId, recentMatch)
+                )
+            }
+        }
+        UserRepository.SignupOutcome.ALREADY_REGISTERED -> response.respond {
+            content = "⚠️ You're already registered. Use `/unsubscribe` first if you want to change your account ID."
+        }
+        UserRepository.SignupOutcome.ACCOUNT_ID_IN_USE -> response.respond {
+            content = "⚠️ Deadlock account `$accountId` is already being tracked by someone else."
+        }
     }
 }
 
@@ -91,8 +99,8 @@ private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, 
     val discordUser = interaction.user.globalName
     val client = DeadlockClient()
     val recentMatch = client.getRecentMatch(accountId)[0]
-    client.close()
     val additionalMatchInfo = client.getMatchByMatchID(recentMatch.matchId)
+    client.close()
     val channel = kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(
         channelId
     )

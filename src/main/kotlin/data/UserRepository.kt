@@ -17,33 +17,22 @@ object UserRepository {
     )
 
     /** Outcome of a signup attempt, so callers can respond accurately. */
-    enum class SignupOutcome { REGISTERED, UPDATED, ALREADY_REGISTERED }
+    enum class SignupOutcome { REGISTERED, ALREADY_REGISTERED, ACCOUNT_ID_IN_USE }
 
     fun addUser(discordId: String, accountId: String, channelId: String, discordUser: String): SignupOutcome = transaction {
-        val existing = UserTable.selectAll().where { UserTable.discordId eq discordId }.firstOrNull()
-        when {
-            existing == null -> {
-                UserTable.insert {
-                    it[UserTable.discordId] = discordId
-                    it[UserTable.accountId] = accountId
-                    it[UserTable.discordUser] = discordUser
-                    it[UserTable.channelId] = channelId
-                }
-                SignupOutcome.REGISTERED
-            }
-            existing[UserTable.accountId] == accountId && existing[UserTable.channelId] == channelId -> {
-                SignupOutcome.ALREADY_REGISTERED
-            }
-            else -> {
-                // Same Discord user re-linking a different account or tracking channel.
-                UserTable.update({ UserTable.discordId eq discordId }) {
-                    it[UserTable.accountId] = accountId
-                    it[UserTable.channelId] = channelId
-                    it[UserTable.discordUser] = discordUser
-                }
-                SignupOutcome.UPDATED
-            }
+        if (!UserTable.selectAll().where { UserTable.discordId eq discordId }.empty()) {
+            return@transaction SignupOutcome.ALREADY_REGISTERED
         }
+        if (!UserTable.selectAll().where { UserTable.accountId eq accountId }.empty()) {
+            return@transaction SignupOutcome.ACCOUNT_ID_IN_USE
+        }
+        UserTable.insert {
+            it[UserTable.discordId] = discordId
+            it[UserTable.accountId] = accountId
+            it[UserTable.discordUser] = discordUser
+            it[UserTable.channelId] = channelId
+        }
+        SignupOutcome.REGISTERED
     }
 
     fun removeUser(discordId: String) = transaction {

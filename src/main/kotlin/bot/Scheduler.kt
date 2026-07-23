@@ -17,10 +17,13 @@ suspend fun startScheduler(kord: Kord) = coroutineScope {
     while (true) {
         val users = UserRepository.getAllUsers()
 
-        // Launch concurrent requests for all users
-        val jobs = users.map { (discordId, accountId, discordUser, lastMatchId, channelId) ->
+        // Launch concurrent requests for all users, staggering each job's start so we don't
+        // fire every user's request at the API simultaneously.
+        val jobs = users.mapIndexed { index, (discordId, accountId, discordUser, lastMatchId, channelId) ->
             launch {
                 try {
+                    delay(index * 6000L)
+
                     println("Getting recent match for: $accountId")
 
                     val latestMatch = client.getRecentMatch(accountId)[0]
@@ -32,10 +35,6 @@ suspend fun startScheduler(kord: Kord) = coroutineScope {
                         val channel = kord.getChannelOf<TextChannel>(channelIdSnowflake)
                         MatchMessageGenerator.generateRecentMatch(latestMatch, discordUser, channel, additionalMatchInfo)
                     }
-
-                    // Small stagger between launches to avoid overwhelming the API
-                    delay(6000L)
-
                 } catch (e: Exception) {
                     println("Error checking matches for $accountId: ${e.message}")
                 }

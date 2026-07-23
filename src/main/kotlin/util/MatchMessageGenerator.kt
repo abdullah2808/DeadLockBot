@@ -5,7 +5,6 @@ import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.entity.channel.TextChannel
 import dev.kord.rest.builder.message.EmbedBuilder
 import dev.kord.rest.builder.message.create.embed
-import data.UserRepository
 import models.HeroRepository
 import models.MatchHistoryDTO
 import kotlin.time.Duration.Companion.seconds
@@ -24,24 +23,15 @@ object MatchMessageGenerator {
     fun buildWelcomeEmbed(
         userName: String?,
         accountId: String,
-        recentMatch: MatchHistoryDTO?,
-        outcome: UserRepository.SignupOutcome
+        recentMatch: MatchHistoryDTO?
     ): EmbedBuilder {
         val name = userName ?: "Player"
-        val (headline, intro) = when (outcome) {
-            UserRepository.SignupOutcome.REGISTERED ->
-                "🎉 Welcome, $name!" to "You're all set up for automatic Deadlock match tracking."
-            UserRepository.SignupOutcome.UPDATED ->
-                "🔄 Account updated, $name" to "I've relinked your Deadlock account and tracking channel."
-            UserRepository.SignupOutcome.ALREADY_REGISTERED ->
-                "ℹ️ Already tracking you, $name" to "This account is already linked here — nothing to change."
-        }
 
         return EmbedBuilder().apply {
-            title = headline
+            title = "🎉 Welcome, $name!"
             color = Color(0x1ABC9C)
             description = buildString {
-                appendLine(intro)
+                appendLine("You're all set up for automatic Deadlock match tracking.")
                 appendLine()
                 appendLine("**Linked account:** `$accountId`")
                 if (recentMatch != null) {

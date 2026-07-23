@@ -28,6 +28,11 @@ dependencies {
     implementation("org.postgresql:postgresql:42.7.3")
     implementation("io.github.cdimascio:dotenv-kotlin:6.4.1")
     implementation("ch.qos.logback:logback-classic:1.5.6")
+
+    testImplementation(kotlin("test-junit5"))
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("io.ktor:ktor-client-mock:3.0.0")
+    testImplementation("com.h2database:h2:2.3.232")
 }
 
 tasks.test {
