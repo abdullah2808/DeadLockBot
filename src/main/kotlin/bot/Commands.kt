@@ -44,13 +44,15 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction) {
     val discordId = interaction.user.id.toString()
     val channelId = interaction.channelId.toString()
     val discordUser = interaction.user.globalName.toString()
-    println(discordId)
-    println(accountId)
-    println(channelId)
 
-    UserRepository.addUser(discordId, accountId, channelId, discordUser)
+    val outcome = UserRepository.addUser(discordId, accountId, channelId, discordUser)
+    val message = when (outcome) {
+        UserRepository.SignupOutcome.REGISTERED -> "✅ Registered your Deadlock account: `$accountId`."
+        UserRepository.SignupOutcome.ALREADY_REGISTERED -> "⚠️ You're already registered. Use `/unsubscribe` first if you want to change your account ID."
+        UserRepository.SignupOutcome.ACCOUNT_ID_IN_USE -> "⚠️ Deadlock account `$accountId` is already being tracked by someone else."
+    }
     interaction.deferPublicResponse().respond {
-        content = "✅ Registered your Deadlock account: `$accountId`."
+        content = message
     }
 }
 
@@ -60,8 +62,8 @@ private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, 
     val discordUser = interaction.user.globalName
     val client = DeadlockClient()
     val recentMatch = client.getRecentMatch(accountId)[0]
-    client.close()
     val additionalMatchInfo = client.getMatchByMatchID(recentMatch.matchId)
+    client.close()
     val channel = kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(
         channelId
     )

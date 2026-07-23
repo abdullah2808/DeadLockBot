@@ -16,15 +16,22 @@ object UserRepository {
         val channelId: String?
     )
 
-    fun addUser(discordId: String, accountId: String, channelId: String, discordUser: String) = transaction {
-        if (UserTable.selectAll().where { UserTable.discordId eq discordId }.empty()) {
-            UserTable.insert {
-                it[UserTable.discordId] = discordId
-                it[UserTable.accountId] = accountId
-                it[UserTable.discordUser] = discordUser
-                it[UserTable.channelId] = channelId
-            }
+    enum class SignupOutcome { REGISTERED, ALREADY_REGISTERED, ACCOUNT_ID_IN_USE }
+
+    fun addUser(discordId: String, accountId: String, channelId: String, discordUser: String): SignupOutcome = transaction {
+        if (!UserTable.selectAll().where { UserTable.discordId eq discordId }.empty()) {
+            return@transaction SignupOutcome.ALREADY_REGISTERED
         }
+        if (!UserTable.selectAll().where { UserTable.accountId eq accountId }.empty()) {
+            return@transaction SignupOutcome.ACCOUNT_ID_IN_USE
+        }
+        UserTable.insert {
+            it[UserTable.discordId] = discordId
+            it[UserTable.accountId] = accountId
+            it[UserTable.discordUser] = discordUser
+            it[UserTable.channelId] = channelId
+        }
+        SignupOutcome.REGISTERED
     }
 
     fun removeUser(discordId: String) = transaction {

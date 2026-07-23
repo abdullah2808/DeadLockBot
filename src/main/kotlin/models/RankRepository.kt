@@ -29,23 +29,29 @@ object RankRepository {
     }.decodeFromString<List<Rank>>(json)
 
 
-    fun getRankImage(matchHistory: MatchHistoryDTO, additionalMatchInfo: MatchDTO?) : String? {
-        val avgTeamRank: Int
-        when (matchHistory.playerTeam) {
-            1 -> avgTeamRank = additionalMatchInfo?.matchInfo?.averageBadgeTeam1 ?: 0
-            0 -> avgTeamRank = additionalMatchInfo?.matchInfo?.averageBadgeTeam0 ?: 0
-            else -> avgTeamRank = 0
+    fun getRankImage(matchHistory: MatchHistoryDTO, additionalMatchInfo: MatchDTO?): String? {
+        val avgTeamRank = when (matchHistory.playerTeam) {
+            1 -> additionalMatchInfo?.matchInfo?.averageBadgeTeam1 ?: 0
+            0 -> additionalMatchInfo?.matchInfo?.averageBadgeTeam0 ?: 0
+            else -> 0
         }
+        return rankImageForBadge(avgTeamRank, ranks)
+    }
+
+    // Pure and bounds-safe so it can be unit tested without a network call, and so an
+    // out-of-range badge value can't throw IndexOutOfBoundsException in a command handler.
+    fun rankImageForBadge(avgTeamRank: Int, ranks: List<Rank>): String? {
         val tier = avgTeamRank / 10
         val subrank = avgTeamRank % 10
+        val rank = ranks.getOrNull(tier) ?: return null
         return when (subrank) {
-            1 -> ranks[tier].images?.smallSubRankOne
-            2 -> ranks[tier].images?.smallSubRankTwo
-            3 -> ranks[tier].images?.smallSubRankThree
-            4 -> ranks[tier].images?.smallSubRankFour
-            5 -> ranks[tier].images?.smallSubRankFive
-            6 -> ranks[tier].images?.smallSubRankSix
-            else -> ""
+            1 -> rank.images?.smallSubRankOne
+            2 -> rank.images?.smallSubRankTwo
+            3 -> rank.images?.smallSubRankThree
+            4 -> rank.images?.smallSubRankFour
+            5 -> rank.images?.smallSubRankFive
+            6 -> rank.images?.smallSubRankSix
+            else -> null
         }
     }
 }

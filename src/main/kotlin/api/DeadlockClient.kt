@@ -16,22 +16,14 @@ import kotlinx.serialization.json.Json
 import models.MatchDTO
 import models.MatchHistoryDTO
 
-class DeadlockClient() {
-
-    val client = HttpClient(CIO) {
-        install(ContentNegotiation) {
-            json(Json {
-                prettyPrint = true
-                isLenient = true
-                ignoreUnknownKeys = true
-            })
-        }
-    }
+class DeadlockClient(
+    private val client: HttpClient = defaultHttpClient(),
+    private val retryDelayMillis: Long = 10_000L
+) {
 
     suspend fun getRecentMatch(accountId: String): List<MatchHistoryDTO> {
         var url = "https://api.deadlock-api.com/v1/players/$accountId/match-history"
         val maxRetries = 3
-        val delayMillis = 10_000L // 10 seconds
 
         var lastError: Throwable? = null
         // add a force refresh param on the last try
@@ -63,8 +55,8 @@ class DeadlockClient() {
 
             // Only delay if not on the last attempt
             if (attempt < maxRetries - 1) {
-                println("Waiting ${delayMillis / 1000} seconds before retrying...")
-                delay(delayMillis)
+                println("Waiting ${retryDelayMillis / 1000} seconds before retrying...")
+                delay(retryDelayMillis)
             }
         }
         throw RuntimeException(
@@ -85,5 +77,17 @@ class DeadlockClient() {
 
     suspend fun close() {
         client.close()
+    }
+
+    companion object {
+        private fun defaultHttpClient(): HttpClient = HttpClient(CIO) {
+            install(ContentNegotiation) {
+                json(Json {
+                    prettyPrint = true
+                    isLenient = true
+                    ignoreUnknownKeys = true
+                })
+            }
+        }
     }
 }
