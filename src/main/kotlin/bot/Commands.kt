@@ -9,11 +9,12 @@ import data.UserRepository
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.rest.builder.interaction.string
+import util.AccountId
 import util.MatchMessageGenerator
 
 suspend fun registerCommands(kord: Kord) {
     kord.createGlobalChatInputCommand("signup", "Track your Deadlock matches") {
-        string("account_id", "Your Deadlock account ID") { required = true }
+        string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
     }
 
     kord.createGlobalChatInputCommand("unsubscribe", "Stop tracking your matches")
@@ -40,17 +41,47 @@ suspend fun handleCommands(kord: Kord) {
 }
 
 private suspend fun handleSignup(interaction: ChatInputCommandInteraction) {
-    val accountId = interaction.command.strings["account_id"]!!
+    val response = interaction.deferPublicResponse()
+
+    val rawAccountId = interaction.command.strings["account_id"]!!
     val discordId = interaction.user.id.toString()
     val channelId = interaction.channelId.toString()
-    val discordUser = interaction.user.globalName.toString()
-    println(discordId)
-    println(accountId)
-    println(channelId)
+    val discordUser = interaction.user.globalName ?: interaction.user.username
 
-    UserRepository.addUser(discordId, accountId, channelId, discordUser)
-    interaction.deferPublicResponse().respond {
-        content = "✅ Registered your Deadlock account: `$accountId`."
+    // 1. Normalize the input (account id, SteamID64, or profile URL) and validate.
+    val accountId = AccountId.normalize(rawAccountId)
+    if (accountId == null) {
+        response.respond {
+            content = "⚠️ `$rawAccountId` doesn't look like a valid Deadlock account. " +
+                "Please enter your numeric account ID, your 17-digit SteamID64, or your Steam profile URL."
+        }
+        return
+    }
+
+    // 2. Verify the account actually resolves against the Deadlock API before saving.
+    val client = DeadlockClient()
+    val matches = try {
+        client.verifyAccount(accountId)
+    } finally {
+        client.close()
+    }
+
+    if (matches == null) {
+        response.respond {
+            content = "❌ I couldn't verify Deadlock account `$accountId` right now. " +
+                "Double-check the ID and try again in a moment."
+        }
+        return
+    }
+
+    // 3. Register (or update) the user, and 4. reply with a rich welcome embed.
+    val outcome = UserRepository.addUser(discordId, accountId, channelId, discordUser)
+    val recentMatch = matches.firstOrNull()
+
+    response.respond {
+        embeds = mutableListOf(
+            MatchMessageGenerator.buildWelcomeEmbed(discordUser, accountId, recentMatch, outcome)
+        )
     }
 }
 

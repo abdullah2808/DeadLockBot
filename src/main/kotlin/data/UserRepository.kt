@@ -16,13 +16,32 @@ object UserRepository {
         val channelId: String?
     )
 
-    fun addUser(discordId: String, accountId: String, channelId: String, discordUser: String) = transaction {
-        if (UserTable.selectAll().where { UserTable.discordId eq discordId }.empty()) {
-            UserTable.insert {
-                it[UserTable.discordId] = discordId
-                it[UserTable.accountId] = accountId
-                it[UserTable.discordUser] = discordUser
-                it[UserTable.channelId] = channelId
+    /** Outcome of a signup attempt, so callers can respond accurately. */
+    enum class SignupOutcome { REGISTERED, UPDATED, ALREADY_REGISTERED }
+
+    fun addUser(discordId: String, accountId: String, channelId: String, discordUser: String): SignupOutcome = transaction {
+        val existing = UserTable.selectAll().where { UserTable.discordId eq discordId }.firstOrNull()
+        when {
+            existing == null -> {
+                UserTable.insert {
+                    it[UserTable.discordId] = discordId
+                    it[UserTable.accountId] = accountId
+                    it[UserTable.discordUser] = discordUser
+                    it[UserTable.channelId] = channelId
+                }
+                SignupOutcome.REGISTERED
+            }
+            existing[UserTable.accountId] == accountId && existing[UserTable.channelId] == channelId -> {
+                SignupOutcome.ALREADY_REGISTERED
+            }
+            else -> {
+                // Same Discord user re-linking a different account or tracking channel.
+                UserTable.update({ UserTable.discordId eq discordId }) {
+                    it[UserTable.accountId] = accountId
+                    it[UserTable.channelId] = channelId
+                    it[UserTable.discordUser] = discordUser
+                }
+                SignupOutcome.UPDATED
             }
         }
     }
