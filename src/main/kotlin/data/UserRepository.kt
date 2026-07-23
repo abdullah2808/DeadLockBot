@@ -16,6 +16,7 @@ object UserRepository {
         val channelId: String?
     )
 
+    /** Outcome of a signup attempt, so callers can respond accurately. */
     enum class SignupOutcome { REGISTERED, ALREADY_REGISTERED, ACCOUNT_ID_IN_USE }
 
     fun addUser(discordId: String, accountId: String, channelId: String, discordUser: String): SignupOutcome = transaction {
