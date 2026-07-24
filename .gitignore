@@ -43,3 +43,7 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Secrets / local config ###
+.env
+steam_refresh_token.txt

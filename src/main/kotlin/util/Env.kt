@@ -24,4 +24,17 @@ object Env {
     val DB_PASSWORD: String = dotenv?.get("DB_PASSWORD")
         ?: System.getenv("DB_PASSWORD")
         ?: error("Missing DB_PASSWORD")
+
+    // Steam bot account for the Deadlock Game Coordinator (Phase B). Optional:
+    // when unset, the scheduler falls back to the active-feed match source.
+    private fun optional(key: String): String? =
+        (dotenv?.get(key) ?: System.getenv(key))?.takeIf { it.isNotBlank() }
+
+    val STEAM_USERNAME: String? = optional("STEAM_USERNAME")
+    val STEAM_PASSWORD: String? = optional("STEAM_PASSWORD")
+
+    // A previously-issued refresh token. Preferred for headless/deployed runs so
+    // no interactive Steam Guard prompt is needed. See GcClient for how the token
+    // is obtained and persisted on first login.
+    val STEAM_REFRESH_TOKEN: String? = optional("STEAM_REFRESH_TOKEN")
 }

@@ -1,0 +1,74 @@
+syntax = "proto2";
+
+option java_package = "gc.citadel";
+option java_outer_classname = "CitadelMatchHistory";
+
+// Minimal, self-contained subset of Deadlock's citadel_gcmessages_client.proto,
+// covering only the match-history request/response. Field numbers match the
+// real protobufs exactly, so the wire encoding is compatible with the Game
+// Coordinator. The three Deadlock enum types (ECitadelGameMode,
+// ECitadelMatchMode, ECitadelLobbyTeam) are modelled as int32 here — protobuf
+// encodes enums as varints, so this is wire-compatible and avoids pulling in
+// the entire Source 2 protobuf import tree.
+//
+// GC message ids (from EGCCitadelClientMessages):
+//   k_EMsgClientToGCGetMatchHistory         = 9112
+//   k_EMsgClientToGCGetMatchHistoryResponse = 9113
+// GC-SDK handshake ids (from EGCBaseClientMsg, game-agnostic):
+//   k_EMsgGCClientHello   = 4006
+//   k_EMsgGCClientWelcome = 4004
+
+// Minimal handshake message. The GC-SDK CMsgClientHello has many optional
+// fields; only `version` (field 1) is needed, and it may be sent empty.
+message CMsgClientHello {
+    optional uint32 version = 1;
+}
+
+message CMsgClientToGCGetMatchHistory {
+    optional uint32 account_id = 1;
+    optional uint64 continue_cursor = 2;
+    optional int32 game_mode = 4;   // ECitadelGameMode
+    optional int32 match_mode = 5;  // ECitadelMatchMode
+}
+
+message CMsgClientToGCGetMatchHistoryResponse {
+    message Match {
+        optional uint64 match_id = 1;
+        optional uint32 hero_id = 2;
+        optional uint32 match_duration_s = 3;
+        optional uint32 start_time = 4;
+        optional uint32 match_result = 5;
+        optional int32 player_team = 6; // ECitadelLobbyTeam
+        optional uint32 player_kills = 7;
+        optional uint32 player_deaths = 8;
+        optional uint32 player_assists = 9;
+        optional uint32 last_hits = 11;
+        optional uint32 denies = 12;
+        optional uint32 hero_level = 13;
+        optional uint32 net_worth = 14;
+        optional uint64 objectives_mask_team0 = 15;
+        optional uint64 objectives_mask_team1 = 16;
+        optional bool team_abandoned = 17;
+        optional uint32 abandoned_time_s = 18;
+        optional int32 match_mode = 19; // ECitadelMatchMode
+        optional int32 game_mode = 20;  // ECitadelGameMode
+        optional bool not_scored = 21;
+        optional uint32 game_mode_version = 22;
+        optional uint32 brawl_score_team0 = 23;
+        optional uint32 brawl_score_team1 = 24;
+        optional uint32 brawl_avg_round_time_s = 25;
+    }
+
+    enum EResult {
+        k_eResult_InternalError = 0;
+        k_eResult_Success = 1;
+        k_eResult_InvalidPermission = 2;
+        k_eResult_TemporarilyDisabled = 3;
+        k_eResult_TooBusy = 4;
+        k_eResult_RateLimited = 5;
+    }
+
+    optional EResult result = 1 [default = k_eResult_InternalError];
+    optional uint64 continue_cursor = 2;
+    repeated Match matches = 3;
+}
