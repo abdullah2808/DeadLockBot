@@ -44,12 +44,56 @@ class DeadlockClientTest {
         ]
     """.trimIndent()
 
+    private val sampleActiveMatchesJson = """
+        [
+          {
+            "match_id": 95217129,
+            "start_time": 1784798737,
+            "players": [
+              { "account_id": 100583809, "team": 0, "hero_id": 4 },
+              { "account_id": 993986242, "team": 1, "hero_id": 19 }
+            ]
+          }
+        ]
+    """.trimIndent()
+
     private fun mockClient(handler: MockRequestHandler): HttpClient =
         HttpClient(MockEngine(handler)) {
             install(ContentNegotiation) {
                 json(Json { ignoreUnknownKeys = true })
             }
         }
+
+    @Test
+    fun `getActiveMatches parses live matches and player account ids`() = runTest {
+        val client = mockClient {
+            respond(
+                content = sampleActiveMatchesJson,
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json")
+            )
+        }
+        val deadlockClient = DeadlockClient(client, retryDelayMillis = 0)
+
+        val result = deadlockClient.getActiveMatches()
+
+        assertEquals(1, result.size)
+        assertEquals(95217129L, result[0].matchId)
+        assertEquals(2, result[0].players.size)
+        assertEquals(100583809L, result[0].players[0].accountId)
+    }
+
+    @Test
+    fun `getActiveMatches throws after exhausting retries`() = runTest {
+        val client = mockClient {
+            respond(content = "", status = HttpStatusCode.InternalServerError)
+        }
+        val deadlockClient = DeadlockClient(client, retryDelayMillis = 0)
+
+        assertFailsWith<RuntimeException> {
+            deadlockClient.getActiveMatches()
+        }
+    }
 
     @Test
     fun `getRecentMatch returns matches on first success`() = runTest {
