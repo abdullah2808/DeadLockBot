@@ -1,6 +1,7 @@
 package bot
 
 import api.DeadlockClient
+import api.gc.MatchHistoryProvider
 import data.UserRepository
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
@@ -24,10 +25,20 @@ private const val MAX_METADATA_ATTEMPTS = 5
  * player's row, and posts the summary embed — de-duping against the persisted
  * `last_match_id`. This replaces the previous per-user polling of the stale
  * per-player match-history endpoint.
+ *
+ * When [gcProvider] is supplied (Steam bot account configured), matches are
+ * discovered via the authoritative Deadlock Game Coordinator ([GcMatchSource]);
+ * otherwise it falls back to the top-150 active feed ([ActiveFeedMatchSource]).
  */
-suspend fun startScheduler(kord: Kord) {
+suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null) {
     val client = DeadlockClient()
-    val source: MatchSource = ActiveFeedMatchSource(client)
+    val source: MatchSource = if (gcProvider != null) {
+        println("Match source: Deadlock Game Coordinator.")
+        GcMatchSource(gcProvider)
+    } else {
+        println("Match source: active feed (no Steam credentials configured).")
+        ActiveFeedMatchSource(client)
+    }
 
     // Matches awaiting a successful post (metadata not ready yet, or a transient
     // post error), with their attempt counts.
