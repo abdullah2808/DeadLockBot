@@ -19,6 +19,7 @@ import `in`.dragonbra.javasteam.steam.steamclient.callbackmgr.CallbackManager
 import `in`.dragonbra.javasteam.steam.steamclient.callbacks.ConnectedCallback
 import `in`.dragonbra.javasteam.steam.steamclient.callbacks.DisconnectedCallback
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
@@ -61,6 +62,7 @@ class GcClient(
         // EGCBaseClientMsg (game-agnostic GC-SDK handshake).
         const val MSG_GC_CLIENT_HELLO = 4006
         const val MSG_GC_CLIENT_WELCOME = 4004
+        const val WELCOME_TIMEOUT_MS = 15_000L
         const val REQUEST_TIMEOUT_MS = 20_000L
         const val LOGIN_ID = 149
     }
@@ -72,6 +74,7 @@ class GcClient(
 
     @Volatile private var running = false
     @Volatile private var gcWelcomed = false
+    @Volatile private var helloCount = 0
     private val welcome = CompletableDeferred<Unit>()
 
     // The GC response isn't tagged with the requested account_id, so only one
@@ -100,13 +103,27 @@ class GcClient(
     }
 
     override suspend fun recentMatchIds(accountId: String): List<Long> = requestMutex.withLock {
-        // Block until the GC session is ready (bounded), then send + await the response.
-        withTimeout(REQUEST_TIMEOUT_MS) { welcome.await() }
+        // First make sure the GC session is up. Separated from the request wait so
+        // the logs distinguish "no GC session" from "GC didn't answer the request".
+        if (!gcWelcomed) {
+            try {
+                withTimeout(WELCOME_TIMEOUT_MS) { welcome.await() }
+            } catch (e: TimeoutCancellationException) {
+                println("GC bot: no ClientWelcome after ${WELCOME_TIMEOUT_MS}ms — GC session not established; skipping $accountId this cycle.")
+                return@withLock emptyList()
+            }
+        }
+
+        val steam3 = accountId.toLong().toInt()
         val deferred = CompletableDeferred<List<Long>>()
         pending = deferred
-        try {
-            sendGetMatchHistory(accountId)
+        return@withLock try {
+            println("GC bot: -> GetMatchHistory account=$accountId (steam3=$steam3).")
+            sendGetMatchHistory(steam3)
             withTimeout(REQUEST_TIMEOUT_MS) { deferred.await() }
+        } catch (e: TimeoutCancellationException) {
+            println("GC bot: no GetMatchHistory response for $accountId within ${REQUEST_TIMEOUT_MS}ms.")
+            emptyList()
         } finally {
             pending = null
         }
@@ -161,7 +178,7 @@ class GcClient(
             println("GC bot: unable to log on: ${callback.result} / ${callback.extendedResult}")
             return
         }
-        println("GC bot: logged on; establishing Deadlock GC session...")
+        println("GC bot: logged on; sending games-played($DEADLOCK_APP_ID) and hellos to establish the Deadlock GC session...")
         startPlayingGame(DEADLOCK_APP_ID)
         // Some GCs only welcome after repeated hellos; send until welcomed.
         thread(name = "steam-gc-hello", isDaemon = true) {
@@ -173,6 +190,9 @@ class GcClient(
     }
 
     private fun onGcMessage(callback: MessageCallback) {
+        // Log every inbound GC message so we can see whether the welcome (4004)
+        // and the match-history response (9113) actually arrive.
+        println("GC bot: <- GC message appID=${callback.appID} msgType=${callback.message.msgType}")
         if (callback.appID != DEADLOCK_APP_ID) return
         when (callback.message.msgType) {
             MSG_GC_CLIENT_WELCOME -> {
@@ -199,17 +219,18 @@ class GcClient(
         }
     }
 
-    private fun sendGetMatchHistory(accountId: String) {
+    private fun sendGetMatchHistory(steam3AccountId: Int) {
         val request = ClientGCMsgProtobuf<CitadelMatchHistory.CMsgClientToGCGetMatchHistory.Builder>(
             CitadelMatchHistory.CMsgClientToGCGetMatchHistory::class.java,
             MSG_GET_MATCH_HISTORY,
         )
-        // account_id is uint32; toInt() carries the correct 32-bit value onto the wire.
-        request.body.setAccountId(accountId.toLong().toInt())
+        request.body.setAccountId(steam3AccountId)
         gameCoordinator.send(request, DEADLOCK_APP_ID)
     }
 
     private fun sendHello() {
+        helloCount++
+        println("GC bot: -> ClientHello #$helloCount (waiting for GC welcome).")
         val hello = ClientGCMsgProtobuf<CitadelMatchHistory.CMsgClientHello.Builder>(
             CitadelMatchHistory.CMsgClientHello::class.java,
             MSG_GC_CLIENT_HELLO,
