@@ -75,6 +75,10 @@ class GcClient(
     @Volatile private var running = false
     @Volatile private var gcWelcomed = false
     @Volatile private var helloCount = 0
+    // Whether the last login attempt used a stored refresh token, and whether to
+    // skip the token and force a fresh credential login (set after a token is rejected).
+    @Volatile private var usedStoredToken = false
+    @Volatile private var forceCredentialAuth = false
     private val welcome = CompletableDeferred<Unit>()
 
     // The GC response isn't tagged with the requested account_id, so only one
@@ -130,19 +134,23 @@ class GcClient(
     }
 
     private fun onConnected() {
-        val storedToken = initialRefreshToken
-            ?: tokenFile.takeIf { it.exists() }?.readText()?.trim()?.ifBlank { null }
+        // Skip the stored token if it was just rejected, so we re-auth with credentials.
+        val storedToken = if (forceCredentialAuth) null
+            else initialRefreshToken ?: tokenFile.takeIf { it.exists() }?.readText()?.trim()?.ifBlank { null }
+        usedStoredToken = storedToken != null
         try {
             if (storedToken != null) {
                 println("GC bot: logging in with stored refresh token.")
                 logOnWithToken(username, storedToken)
             } else {
-                requireNotNull(password) { "No refresh token and no STEAM_PASSWORD provided." }
-                println("GC bot: authenticating with credentials (Steam Guard prompt expected on first run)...")
+                requireNotNull(password) { "No usable refresh token and no STEAM_PASSWORD provided." }
+                println("GC bot: authenticating with credentials (Steam Guard/MFA prompt expected)...")
                 val authDetails = AuthSessionDetails().apply {
                     username = this@GcClient.username
                     password = this@GcClient.password
-                    persistentSession = false
+                    // Long-lived refresh token that can be reused across restarts;
+                    // false issues a short-lived token that fails on the next run.
+                    persistentSession = true
                     authenticator = UserConsoleAuthenticator()
                 }
                 val authSession = steamClient.authentication.beginAuthSessionViaCredentials(authDetails).get()
@@ -175,9 +183,19 @@ class GcClient(
 
     private fun onLoggedOn(callback: LoggedOnCallback) {
         if (callback.result != EResult.OK) {
-            println("GC bot: unable to log on: ${callback.result} / ${callback.extendedResult}")
+            if (usedStoredToken) {
+                // Stale token or token for a different account. Discard it and let the
+                // automatic reconnect re-authenticate with username/password (+ MFA).
+                println("GC bot: stored refresh token rejected (${callback.result}); discarding it and re-authenticating with credentials.")
+                runCatching { tokenFile.delete() }
+                forceCredentialAuth = true
+            } else {
+                println("GC bot: unable to log on with credentials: ${callback.result} / ${callback.extendedResult}. Check STEAM_USERNAME / STEAM_PASSWORD.")
+            }
             return
         }
+        // Good login: allow the stored token to be reused on future reconnects.
+        forceCredentialAuth = false
         println("GC bot: logged on; sending games-played($DEADLOCK_APP_ID) and hellos to establish the Deadlock GC session...")
         startPlayingGame(DEADLOCK_APP_ID)
         // Some GCs only welcome after repeated hellos; send until welcomed.
