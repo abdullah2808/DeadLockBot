@@ -1,6 +1,7 @@
 package api.gc
 
 import gc.citadel.CitadelMatchHistory
+import models.MatchHistoryDTO
 import `in`.dragonbra.javasteam.base.ClientMsgProtobuf
 import `in`.dragonbra.javasteam.base.gc.ClientGCMsgProtobuf
 import `in`.dragonbra.javasteam.enums.EMsg
@@ -19,15 +20,16 @@ import `in`.dragonbra.javasteam.steam.steamclient.callbackmgr.CallbackManager
 import `in`.dragonbra.javasteam.steam.steamclient.callbacks.ConnectedCallback
 import `in`.dragonbra.javasteam.steam.steamclient.callbacks.DisconnectedCallback
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.io.File
 import kotlin.concurrent.thread
 
-/** Supplies a player's recent match ids (newest first) — the seam a [bot.GcMatchSource] polls. */
+/** Supplies a player's recent matches (newest first) — the seam a [bot.GcMatchSource] polls. */
 interface MatchHistoryProvider {
-    suspend fun recentMatchIds(accountId: String): List<Long>
+    suspend fun recentMatches(accountId: String): List<MatchHistoryDTO>
 }
 
 /**
@@ -61,6 +63,7 @@ class GcClient(
         // EGCBaseClientMsg (game-agnostic GC-SDK handshake).
         const val MSG_GC_CLIENT_HELLO = 4006
         const val MSG_GC_CLIENT_WELCOME = 4004
+        const val WELCOME_TIMEOUT_MS = 15_000L
         const val REQUEST_TIMEOUT_MS = 20_000L
         const val LOGIN_ID = 149
     }
@@ -72,12 +75,19 @@ class GcClient(
 
     @Volatile private var running = false
     @Volatile private var gcWelcomed = false
+    @Volatile private var helloCount = 0
+    // Whether the last login attempt used a stored refresh token, and whether to
+    // skip the token and force a fresh credential login (set after a token is rejected).
+    @Volatile private var usedStoredToken = false
+    @Volatile private var forceCredentialAuth = false
     private val welcome = CompletableDeferred<Unit>()
 
     // The GC response isn't tagged with the requested account_id, so only one
-    // request is in flight at a time and its response completes [pending].
+    // request is in flight at a time; [pendingAccountId] stamps the response and
+    // [pending] is completed with the parsed matches.
     private val requestMutex = Mutex()
-    @Volatile private var pending: CompletableDeferred<List<Long>>? = null
+    @Volatile private var pendingAccountId: Int = 0
+    @Volatile private var pending: CompletableDeferred<List<MatchHistoryDTO>>? = null
 
     /** Connects and runs the Steam callback loop on a daemon thread. Returns immediately. */
     fun start() {
@@ -99,33 +109,52 @@ class GcClient(
         runCatching { steamUser.logOff() }
     }
 
-    override suspend fun recentMatchIds(accountId: String): List<Long> = requestMutex.withLock {
-        // Block until the GC session is ready (bounded), then send + await the response.
-        withTimeout(REQUEST_TIMEOUT_MS) { welcome.await() }
-        val deferred = CompletableDeferred<List<Long>>()
+    override suspend fun recentMatches(accountId: String): List<MatchHistoryDTO> = requestMutex.withLock {
+        // First make sure the GC session is up. Separated from the request wait so
+        // the logs distinguish "no GC session" from "GC didn't answer the request".
+        if (!gcWelcomed) {
+            try {
+                withTimeout(WELCOME_TIMEOUT_MS) { welcome.await() }
+            } catch (e: TimeoutCancellationException) {
+                println("GC bot: no ClientWelcome after ${WELCOME_TIMEOUT_MS}ms — GC session not established; skipping $accountId this cycle.")
+                return@withLock emptyList()
+            }
+        }
+
+        val steam3 = accountId.toLong().toInt()
+        val deferred = CompletableDeferred<List<MatchHistoryDTO>>()
+        pendingAccountId = steam3
         pending = deferred
-        try {
-            sendGetMatchHistory(accountId)
+        return@withLock try {
+            println("GC bot: -> GetMatchHistory account=$accountId (steam3=$steam3).")
+            sendGetMatchHistory(steam3)
             withTimeout(REQUEST_TIMEOUT_MS) { deferred.await() }
+        } catch (e: TimeoutCancellationException) {
+            println("GC bot: no GetMatchHistory response for $accountId within ${REQUEST_TIMEOUT_MS}ms.")
+            emptyList()
         } finally {
             pending = null
         }
     }
 
     private fun onConnected() {
-        val storedToken = initialRefreshToken
-            ?: tokenFile.takeIf { it.exists() }?.readText()?.trim()?.ifBlank { null }
+        // Skip the stored token if it was just rejected, so we re-auth with credentials.
+        val storedToken = if (forceCredentialAuth) null
+            else initialRefreshToken ?: tokenFile.takeIf { it.exists() }?.readText()?.trim()?.ifBlank { null }
+        usedStoredToken = storedToken != null
         try {
             if (storedToken != null) {
                 println("GC bot: logging in with stored refresh token.")
                 logOnWithToken(username, storedToken)
             } else {
-                requireNotNull(password) { "No refresh token and no STEAM_PASSWORD provided." }
-                println("GC bot: authenticating with credentials (Steam Guard prompt expected on first run)...")
+                requireNotNull(password) { "No usable refresh token and no STEAM_PASSWORD provided." }
+                println("GC bot: authenticating with credentials (Steam Guard/MFA prompt expected)...")
                 val authDetails = AuthSessionDetails().apply {
                     username = this@GcClient.username
                     password = this@GcClient.password
-                    persistentSession = false
+                    // Long-lived refresh token that can be reused across restarts;
+                    // false issues a short-lived token that fails on the next run.
+                    persistentSession = true
                     authenticator = UserConsoleAuthenticator()
                 }
                 val authSession = steamClient.authentication.beginAuthSessionViaCredentials(authDetails).get()
@@ -158,10 +187,20 @@ class GcClient(
 
     private fun onLoggedOn(callback: LoggedOnCallback) {
         if (callback.result != EResult.OK) {
-            println("GC bot: unable to log on: ${callback.result} / ${callback.extendedResult}")
+            if (usedStoredToken) {
+                // Stale token or token for a different account. Discard it and let the
+                // automatic reconnect re-authenticate with username/password (+ MFA).
+                println("GC bot: stored refresh token rejected (${callback.result}); discarding it and re-authenticating with credentials.")
+                runCatching { tokenFile.delete() }
+                forceCredentialAuth = true
+            } else {
+                println("GC bot: unable to log on with credentials: ${callback.result} / ${callback.extendedResult}. Check STEAM_USERNAME / STEAM_PASSWORD.")
+            }
             return
         }
-        println("GC bot: logged on; establishing Deadlock GC session...")
+        // Good login: allow the stored token to be reused on future reconnects.
+        forceCredentialAuth = false
+        println("GC bot: logged on; sending games-played($DEADLOCK_APP_ID) and hellos to establish the Deadlock GC session...")
         startPlayingGame(DEADLOCK_APP_ID)
         // Some GCs only welcome after repeated hellos; send until welcomed.
         thread(name = "steam-gc-hello", isDaemon = true) {
@@ -173,6 +212,9 @@ class GcClient(
     }
 
     private fun onGcMessage(callback: MessageCallback) {
+        // Log every inbound GC message so we can see whether the welcome (4004)
+        // and the match-history response (9113) actually arrive.
+        println("GC bot: <- GC message appID=${callback.appID} msgType=${callback.message.msgType}")
         if (callback.appID != DEADLOCK_APP_ID) return
         when (callback.message.msgType) {
             MSG_GC_CLIENT_WELCOME -> {
@@ -188,28 +230,29 @@ class GcClient(
                     callback.message,
                 )
                 val body = response.body
-                val ids = if (body.result == CitadelMatchHistory.CMsgClientToGCGetMatchHistoryResponse.EResult.k_eResult_Success) {
-                    body.matchesList.map { it.matchId }
+                val matches = if (body.result == CitadelMatchHistory.CMsgClientToGCGetMatchHistoryResponse.EResult.k_eResult_Success) {
+                    body.matchesList.map { it.toMatchHistory(pendingAccountId) }
                 } else {
                     println("GC bot: match-history response result=${body.result}")
                     emptyList()
                 }
-                pending?.let { if (!it.isCompleted) it.complete(ids) }
+                pending?.let { if (!it.isCompleted) it.complete(matches) }
             }
         }
     }
 
-    private fun sendGetMatchHistory(accountId: String) {
+    private fun sendGetMatchHistory(steam3AccountId: Int) {
         val request = ClientGCMsgProtobuf<CitadelMatchHistory.CMsgClientToGCGetMatchHistory.Builder>(
             CitadelMatchHistory.CMsgClientToGCGetMatchHistory::class.java,
             MSG_GET_MATCH_HISTORY,
         )
-        // account_id is uint32; toInt() carries the correct 32-bit value onto the wire.
-        request.body.setAccountId(accountId.toLong().toInt())
+        request.body.setAccountId(steam3AccountId)
         gameCoordinator.send(request, DEADLOCK_APP_ID)
     }
 
     private fun sendHello() {
+        helloCount++
+        println("GC bot: -> ClientHello #$helloCount (waiting for GC welcome).")
         val hello = ClientGCMsgProtobuf<CitadelMatchHistory.CMsgClientHello.Builder>(
             CitadelMatchHistory.CMsgClientHello::class.java,
             MSG_GC_CLIENT_HELLO,

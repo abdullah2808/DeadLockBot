@@ -15,9 +15,10 @@ import util.MatchMessageGenerator
 // benefits from a slightly shorter loop.
 private const val POLL_INTERVAL_MS = 90_000L
 
-// A just-finished match's metadata can lag a little behind the active feed, so we
-// retry a bounded number of times before giving up on it.
-private const val MAX_METADATA_ATTEMPTS = 5
+// A just-finished match's metadata (from deadlock-api) can lag several minutes
+// behind the match ending, so retry generously before giving up. At the poll
+// cadence above this is ~30 min of headroom.
+private const val MAX_METADATA_ATTEMPTS = 20
 
 /**
  * Match-centric tracking loop. Each cycle asks the [MatchSource] which tracked
@@ -62,15 +63,20 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null)
                     continue
                 }
 
+                // Metadata (from deadlock-api) enriches the embed with player/objective
+                // damage and the rank icon, but lags for fresh matches. Best-effort.
                 val metadata = try {
                     client.getMatchByMatchID(finished.matchId)
                 } catch (e: Exception) {
                     println("Metadata fetch error for match ${finished.matchId}: ${e.message}")
                     null
                 }
-                val match = metadata?.toMatchHistory(finished.accountId)
+                // Prefer the GC-provided summary so a match posts immediately; the
+                // active-feed source has no summary, so it falls back to metadata.
+                val match = finished.match ?: metadata?.toMatchHistory(finished.accountId)
 
-                if (metadata == null || match == null) {
+                if (match == null) {
+                    // Active-feed match whose metadata isn't ingested yet — retry.
                     val attempts = (pending[finished] ?: 0) + 1
                     if (attempts >= MAX_METADATA_ATTEMPTS) {
                         println("Giving up on match ${finished.matchId} for ${finished.accountId} after $attempts attempts.")

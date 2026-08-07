@@ -2,7 +2,15 @@ import io.github.cdimascio.dotenv.dotenv
 
 object Env {
     private val dotenv = try {
-        dotenv()  // Loads from .env if available (for local dev)
+        // Loads from .env if present (local dev). Be lenient: a single malformed
+        // line (e.g. `KEY: value` instead of `KEY=value`) or a missing file must
+        // not abort the whole load — otherwise one bad line makes an unrelated
+        // var like DISCORD_TOKEN look "missing". Bad lines are skipped and we
+        // fall back to real environment variables.
+        dotenv {
+            ignoreIfMalformed = true
+            ignoreIfMissing = true
+        }
     } catch (e: Exception) {
         null
     }
