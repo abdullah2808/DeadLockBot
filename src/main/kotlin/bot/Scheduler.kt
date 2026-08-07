@@ -15,9 +15,10 @@ import util.MatchMessageGenerator
 // benefits from a slightly shorter loop.
 private const val POLL_INTERVAL_MS = 90_000L
 
-// A just-finished match's metadata can lag a little behind the active feed, so we
-// retry a bounded number of times before giving up on it.
-private const val MAX_METADATA_ATTEMPTS = 5
+// A just-finished match's metadata (from deadlock-api) can lag several minutes
+// behind the match ending, so retry generously before giving up. At the poll
+// cadence above this is ~30 min of headroom.
+private const val MAX_METADATA_ATTEMPTS = 20
 
 /**
  * Match-centric tracking loop. Each cycle asks the [MatchSource] which tracked

@@ -139,8 +139,17 @@ class DeadlockClient(
     suspend fun getMatchByMatchID(matchId: Long): MatchDTO? {
         val url = "https://api.deadlock-api.com/v1/matches/$matchId/metadata"
         return try {
-            client.get(url).body<MatchDTO>()
-        }  catch (e: Exception) {
+            val response = client.get(url)
+            if (response.status.isSuccess()) {
+                response.body<MatchDTO>()
+            } else {
+                // A just-finished match often isn't ingested yet (404). The
+                // scheduler retries, so report cleanly instead of trying to
+                // deserialize an error body (which throws NoTransformationFound).
+                println("Match $matchId metadata not available yet (${response.status}).")
+                null
+            }
+        } catch (e: Exception) {
             println("Error fetching match $matchId: ${e.message}")
             null
         }
