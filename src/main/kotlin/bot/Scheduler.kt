@@ -63,15 +63,20 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null)
                     continue
                 }
 
+                // Metadata (from deadlock-api) enriches the embed with player/objective
+                // damage and the rank icon, but lags for fresh matches. Best-effort.
                 val metadata = try {
                     client.getMatchByMatchID(finished.matchId)
                 } catch (e: Exception) {
                     println("Metadata fetch error for match ${finished.matchId}: ${e.message}")
                     null
                 }
-                val match = metadata?.toMatchHistory(finished.accountId)
+                // Prefer the GC-provided summary so a match posts immediately; the
+                // active-feed source has no summary, so it falls back to metadata.
+                val match = finished.match ?: metadata?.toMatchHistory(finished.accountId)
 
-                if (metadata == null || match == null) {
+                if (match == null) {
+                    // Active-feed match whose metadata isn't ingested yet — retry.
                     val attempts = (pending[finished] ?: 0) + 1
                     if (attempts >= MAX_METADATA_ATTEMPTS) {
                         println("Giving up on match ${finished.matchId} for ${finished.accountId} after $attempts attempts.")

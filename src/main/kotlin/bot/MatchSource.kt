@@ -2,9 +2,19 @@ package bot
 
 import api.DeadlockClient
 import models.ActiveMatchDTO
+import models.MatchHistoryDTO
 
-/** A match that a tracked account has just finished. */
-data class FinishedMatch(val accountId: String, val matchId: Long)
+/**
+ * A match that a tracked account has just finished. [match] carries the match
+ * summary when the source already has it (the GC source), so it can be posted
+ * without waiting for deadlock-api metadata; it is null for the active-feed
+ * source, which only knows the match id.
+ */
+data class FinishedMatch(
+    val accountId: String,
+    val matchId: Long,
+    val match: MatchHistoryDTO? = null,
+)
 
 /**
  * Detects matches that tracked accounts have finished since the last poll.

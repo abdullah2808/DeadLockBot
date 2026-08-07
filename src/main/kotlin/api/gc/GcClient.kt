@@ -1,6 +1,7 @@
 package api.gc
 
 import gc.citadel.CitadelMatchHistory
+import models.MatchHistoryDTO
 import `in`.dragonbra.javasteam.base.ClientMsgProtobuf
 import `in`.dragonbra.javasteam.base.gc.ClientGCMsgProtobuf
 import `in`.dragonbra.javasteam.enums.EMsg
@@ -26,9 +27,9 @@ import kotlinx.coroutines.withTimeout
 import java.io.File
 import kotlin.concurrent.thread
 
-/** Supplies a player's recent match ids (newest first) — the seam a [bot.GcMatchSource] polls. */
+/** Supplies a player's recent matches (newest first) — the seam a [bot.GcMatchSource] polls. */
 interface MatchHistoryProvider {
-    suspend fun recentMatchIds(accountId: String): List<Long>
+    suspend fun recentMatches(accountId: String): List<MatchHistoryDTO>
 }
 
 /**
@@ -82,9 +83,11 @@ class GcClient(
     private val welcome = CompletableDeferred<Unit>()
 
     // The GC response isn't tagged with the requested account_id, so only one
-    // request is in flight at a time and its response completes [pending].
+    // request is in flight at a time; [pendingAccountId] stamps the response and
+    // [pending] is completed with the parsed matches.
     private val requestMutex = Mutex()
-    @Volatile private var pending: CompletableDeferred<List<Long>>? = null
+    @Volatile private var pendingAccountId: Int = 0
+    @Volatile private var pending: CompletableDeferred<List<MatchHistoryDTO>>? = null
 
     /** Connects and runs the Steam callback loop on a daemon thread. Returns immediately. */
     fun start() {
@@ -106,7 +109,7 @@ class GcClient(
         runCatching { steamUser.logOff() }
     }
 
-    override suspend fun recentMatchIds(accountId: String): List<Long> = requestMutex.withLock {
+    override suspend fun recentMatches(accountId: String): List<MatchHistoryDTO> = requestMutex.withLock {
         // First make sure the GC session is up. Separated from the request wait so
         // the logs distinguish "no GC session" from "GC didn't answer the request".
         if (!gcWelcomed) {
@@ -119,7 +122,8 @@ class GcClient(
         }
 
         val steam3 = accountId.toLong().toInt()
-        val deferred = CompletableDeferred<List<Long>>()
+        val deferred = CompletableDeferred<List<MatchHistoryDTO>>()
+        pendingAccountId = steam3
         pending = deferred
         return@withLock try {
             println("GC bot: -> GetMatchHistory account=$accountId (steam3=$steam3).")
@@ -226,13 +230,13 @@ class GcClient(
                     callback.message,
                 )
                 val body = response.body
-                val ids = if (body.result == CitadelMatchHistory.CMsgClientToGCGetMatchHistoryResponse.EResult.k_eResult_Success) {
-                    body.matchesList.map { it.matchId }
+                val matches = if (body.result == CitadelMatchHistory.CMsgClientToGCGetMatchHistoryResponse.EResult.k_eResult_Success) {
+                    body.matchesList.map { it.toMatchHistory(pendingAccountId) }
                 } else {
                     println("GC bot: match-history response result=${body.result}")
                     emptyList()
                 }
-                pending?.let { if (!it.isCompleted) it.complete(ids) }
+                pending?.let { if (!it.isCompleted) it.complete(matches) }
             }
         }
     }

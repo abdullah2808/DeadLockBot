@@ -21,15 +21,16 @@ class GcMatchSource(private val provider: MatchHistoryProvider) : MatchSource {
         val finished = mutableListOf<FinishedMatch>()
         for (accountId in trackedAccountIds) {
             val newest = try {
-                provider.recentMatchIds(accountId).firstOrNull()
+                provider.recentMatches(accountId).firstOrNull()
             } catch (e: Exception) {
                 println("GC match-history lookup failed for $accountId: ${e.message}")
                 null
             } ?: continue
 
-            if (lastSeen[accountId] != newest) {
-                finished.add(FinishedMatch(accountId, newest))
-                lastSeen[accountId] = newest
+            if (lastSeen[accountId] != newest.matchId) {
+                // Carry the GC summary so the scheduler can post immediately.
+                finished.add(FinishedMatch(accountId, newest.matchId, newest))
+                lastSeen[accountId] = newest.matchId
             }
         }
         // Forget accounts that are no longer tracked.
