@@ -12,11 +12,6 @@ import kotlinx.coroutines.delay
 import models.toMatchHistory
 import util.MatchMessageGenerator
 
-// Poll cadence. The active feed is CDN-cached ~120s, so polling faster gains no
-// fresher data; ~90s keeps detection prompt while the pending-metadata retry
-// benefits from a slightly shorter loop.
-private const val POLL_INTERVAL_MS = 90_000L
-
 /**
  * Match-centric tracking loop. Each cycle asks the [MatchSource] which tracked
  * accounts finished a match, then fetches that match's (fresh) metadata, maps the
@@ -42,6 +37,8 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
     // post error), with their attempt counts.
     val pending = mutableMapOf<FinishedMatch, Int>()
     val retries = MetadataRetrySchedule()
+    // Poll every 90 seconds, but wake after a newly discovered match's 60-second grace period.
+    val timing = NotificationTiming()
 
     try {
         while (true) {
@@ -50,22 +47,36 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                 val usersByAccount = users.associateBy { it.accountId }
                 gcProvider?.updateTrackedAccounts(usersByAccount.keys)
 
-                source.pollFinished(usersByAccount.keys).forEach { pending.putIfAbsent(it, 0) }
+                if (timing.pollDue()) {
+                    try {
+                        source.pollFinished(usersByAccount.keys).forEach { finished ->
+                            if (usersByAccount[finished.accountId]?.lastMatchId == finished.matchId.toString()) return@forEach
+                            if (pending.putIfAbsent(finished, 0) == null) {
+                                timing.discovered(finished)
+                                println("Found match ${finished.matchId} for ${finished.accountId}; waiting 60s for detailed metadata before posting.")
+                            }
+                        }
+                    } finally {
+                        timing.pollFinished()
+                    }
+                }
 
                 for (finished in pending.keys.toList()) {
                     val user = usersByAccount[finished.accountId]
                     if (user == null) {
                         pending.remove(finished)          // no longer tracked
                         retries.forget(finished)
+                        timing.forget(finished)
                         continue
                     }
                     if (finished.matchId.toString() == user.lastMatchId) {
                         pending.remove(finished)          // already posted
                         retries.forget(finished)
+                        timing.forget(finished)
                         continue
                     }
 
-                    if (!retries.ready(finished)) continue
+                    if (!timing.ready(finished) || !retries.ready(finished)) continue
 
                     val cachedSummary = gcProvider?.cachedMatch(finished.accountId, finished.matchId)
 
@@ -94,6 +105,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                             send = { channel -> MatchMessageGenerator.generateRecentMatch(match, user.discordUser, channel, metadata) },
                             persist = { UserRepository.updateLastMatch(finished.accountId, finished.matchId.toString()) },
                         )
+                        timing.forget(finished)
                         println("Posted match ${finished.matchId} for ${finished.accountId}.")
                     } catch (e: CancellationException) {
                         throw e
@@ -107,9 +119,11 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                 throw e
             } catch (e: Exception) {
                 println("Scheduler cycle error: ${e.message}")
+                // Avoid a tight loop if loading users or polling fails before its timer advances.
+                timing.pollFinished()
             }
 
-            delay(POLL_INTERVAL_MS)
+            delay(timing.nextWakeDelayMillis())
         }
     } finally {
         client.close()
