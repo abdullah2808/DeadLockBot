@@ -73,6 +73,15 @@ Full end-game timelines/items are not stored; the decoder retains final per-play
 
 ## Deployment and current match tracking
 
+`/recentmatch` resolves the requested account's Steam display name through the
+shared PlayerNameService, preferring GcClient's Steam friend persona cache and
+falling back to SteamAccountResolver.playerName. The public profile response must
+match the requested numeric account; XML entities/redirects are disabled and
+downloads/time are bounded. Profile names cache for 15 minutes, failures for one
+minute. Missing names fall back to an explicit account-ID label, never the
+requester's Discord name. Escape Steam names as literal title text. Signup,
+automatic notifications and `/lastfive` retain their existing behavior.
+
 See DEPLOYMENT.md for the home-lab commands and acceptance checks. Compose uses
 DB_PASSWORD, an internal DB URL, no host DB port, bounded logs, memory limits and
 a mounted state directory. Username plus the saved STEAM_TOKEN_FILE supports

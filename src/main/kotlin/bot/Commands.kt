@@ -7,6 +7,8 @@ import api.gc.MatchHistoryProvider
 import api.gc.GcHistoryPermissionException
 import api.gc.SteamFriendship
 import api.MatchMetadataService
+import api.PlayerNameService
+import api.asDiscordTitleText
 import kotlinx.coroutines.CancellationException
 import dev.kord.core.Kord
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
@@ -35,7 +37,8 @@ suspend fun registerCommands(kord: Kord) {
 
 }
 
-suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null, metadata: MatchMetadataService? = null) {
+suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null, metadata: MatchMetadataService? = null,
+                           playerNames: PlayerNameService = PlayerNameService()) {
     kord.on<ChatInputCommandInteractionCreateEvent> {
         val interaction = interaction
         when (interaction.command.rootName) {
@@ -49,7 +52,7 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                 }
             }
             "unsubscribe" -> handleUnsubscribe(interaction)
-            "recentmatch" -> handleRecentMatch(interaction, kord, gcProvider, metadata)
+            "recentmatch" -> handleRecentMatch(interaction, kord, gcProvider, metadata, playerNames)
             "lastfive" -> handleLastFive(interaction, kord, gcProvider, metadata)
         }
     }
@@ -112,7 +115,7 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction, gc: M
     }
 }
 
-private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, kord: Kord, gc: MatchHistoryProvider?, metadata: MatchMetadataService?) {
+private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, kord: Kord, gc: MatchHistoryProvider?, metadata: MatchMetadataService?, playerNames: PlayerNameService) {
     val response = interaction.deferEphemeralResponse()
     val accountId = resolveAccountInput(interaction.command.strings["account_id"]!!) { message ->
         response.respond { content = message }
@@ -134,7 +137,8 @@ private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, 
         }
         val info = result.metadata[match.matchId] ?: fetchMetadata(match.matchId)
         val channel = requireNotNull(kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(interaction.channelId))
-        MatchMessageGenerator.generateRecentMatch(match, interaction.user.globalName, channel, info)
+        val playerName = playerNames.nameFor(accountId).asDiscordTitleText()
+        MatchMessageGenerator.generateRecentMatch(match, playerName, channel, info)
         response.respond { content = "✅ Fetched match `${match.matchId}` for `$accountId`." }
     } catch (e: GcHistoryPermissionException) {
         response.respond {

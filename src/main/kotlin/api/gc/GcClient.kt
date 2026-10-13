@@ -47,6 +47,7 @@ interface MatchHistoryProvider {
     suspend fun cachedMatch(accountId: String, matchId: Long): MatchHistoryDTO? = null
     suspend fun metadataDownload(accountId: String, matchId: Long): GcMetadataDownload? = null
     fun steamBotIdentity(): SteamBotIdentity? = null
+    fun steamPlayerName(accountId: String): String? = null
     fun friendship(accountId: String): SteamFriendship = SteamFriendship.UNKNOWN
     fun autoAcceptFriendsEnabled(): Boolean = false
     fun authorizeSignupFriendRequest(accountId: String) {}
@@ -127,6 +128,10 @@ class GcClient(
     }
     fun stop() = close()
     override fun steamBotIdentity() = identity
+    override fun steamPlayerName(accountId: String): String? {
+        if (friendPolicy.status(accountId) != SteamFriendship.FRIEND) return null
+        return steamFriends.getFriendPersonaName(SteamID(76561197960265728L + accountId.toLong()))
+    }
     override fun friendship(accountId: String) = friendPolicy.status(accountId)
     override fun autoAcceptFriendsEnabled() = autoAcceptFriends
     override fun authorizeSignupFriendRequest(accountId: String) = friendPolicy.authorizeSignup(accountId)

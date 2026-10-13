@@ -9,6 +9,8 @@ import data.DatabaseFactory
 import data.MatchCacheRepository
 import api.DeadlockClient
 import api.MatchMetadataService
+import api.PlayerNameService
+import api.SteamAccountResolver
 import api.gc.ValveMetadataClient
 import data.UserRepository
 import dev.kord.core.Kord
@@ -53,7 +55,9 @@ suspend fun main() = coroutineScope {
         find = MatchCacheRepository::findMetadata,
         save = { MatchCacheRepository.saveEnrichedMetadata(it, UserRepository.getAllUsers().map { user -> user.accountId }.toSet()) },
         knownMatch = { account, match -> MatchCacheRepository.find(account, match) != null })
-    handleCommands(kord, gcProvider, metadata)
+    val profileResolver = SteamAccountResolver()
+    val playerNames = PlayerNameService(steamName = { gcProvider?.steamPlayerName(it) }, profileName = profileResolver::playerName)
+    handleCommands(kord, gcProvider, metadata, playerNames)
     val scheduler = launch { startScheduler(kord, gcProvider, metadata) }
     try {
         kord.login { presence { playing("tracking Deadlock matches") } }
@@ -62,6 +66,7 @@ suspend fun main() = coroutineScope {
             scheduler.cancelAndJoin()
             gcProvider?.close()
             valveClient.close()
+            profileResolver.close()
             apiClient.close()
         }
     }

@@ -216,6 +216,13 @@ privacy. `/recentmatch` and `/lastfive` explain denied GC access and show the
 bot profile instead of reporting a generic failure. Signup tries GC verification
 before relying on the public API.
 
+`/recentmatch account_id:...` labels its public match post with the requested
+account's current Steam display name. It reads the Steam bot's friend-name cache
+first, then a public Steam profile lookup with a three-second timeout. Profile
+names are cached for 15 minutes; failed lookups retry after a minute. If neither
+source supplies a name, the title explicitly uses `Account <account_id>`.
+This lookup is independent of the Discord user who requested the match.
+
 ### Detailed match cache
 
 When a new match is detected, the GC supplies Valve's metadata download

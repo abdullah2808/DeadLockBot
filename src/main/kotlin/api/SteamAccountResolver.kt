@@ -5,10 +5,15 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
+import io.ktor.client.request.prepareGet
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
+import io.ktor.utils.io.readRemaining
+import kotlinx.io.readByteArray
 import org.xml.sax.InputSource
 import org.xml.sax.helpers.DefaultHandler
 import util.AccountId
@@ -36,7 +41,7 @@ class SteamAccountResolver(private val client: HttpClient = defaultHttpClient())
             when {
                 response.status == HttpStatusCode.NotFound -> AccountResolution.Invalid
                 !response.status.isSuccess() -> AccountResolution.Unavailable
-                else -> parseAccountId(response.bodyAsText())?.let(AccountResolution::Resolved)
+                else -> parseProfile(response.bodyAsText())?.accountId?.let(AccountResolution::Resolved)
                     ?: AccountResolution.Unavailable
             }
         } catch (e: CancellationException) {
@@ -44,6 +49,25 @@ class SteamAccountResolver(private val client: HttpClient = defaultHttpClient())
         } catch (_: Exception) {
             AccountResolution.Unavailable
         }
+    }
+
+    /** Optional display-name lookup; verify the response belongs to the requested numeric account. */
+    suspend fun playerName(rawAccount: String): String? {
+        val account = AccountId.normalize(rawAccount) ?: return null
+        return try {
+            withTimeoutOrNull(3_000) {
+                val steamId64 = 76561197960265728L + account.toLong()
+                client.prepareGet("https://steamcommunity.com/profiles/$steamId64/") { parameter("xml", "1") }
+                    .execute { response ->
+                        if (!response.status.isSuccess()) return@execute null
+                        val bytes = response.bodyAsChannel().readRemaining(65_537).readByteArray()
+                        if (bytes.size > 65_536) return@execute null
+                        parseProfile(bytes.decodeToString(throwOnInvalidSequence = true))
+                            ?.takeIf { it.accountId == account }?.name
+                    }
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { null }
     }
 
     override fun close() = client.close()
@@ -58,7 +82,8 @@ class SteamAccountResolver(private val client: HttpClient = defaultHttpClient())
             }
         }
 
-        private fun parseAccountId(xml: String): String? {
+        private data class Profile(val accountId: String, val name: String?)
+        private fun parseProfile(xml: String): Profile? {
             val factory = DocumentBuilderFactory.newInstance().apply {
                 setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
                 setFeature("http://xml.org/sax/features/external-general-entities", false)
@@ -74,7 +99,10 @@ class SteamAccountResolver(private val client: HttpClient = defaultHttpClient())
             val ids = document.documentElement.getElementsByTagName("steamID64")
             if (ids.length != 1) return null
             val steamId = ids.item(0).textContent.trim()
-            return steamId.takeIf { it.length == 17 }?.let(AccountId::normalize)
+            val account = steamId.takeIf { it.length == 17 }?.let(AccountId::normalize) ?: return null
+            val names = document.documentElement.getElementsByTagName("steamID")
+            val name = if (names.length == 1) names.item(0).textContent else null
+            return Profile(account, name)
         }
     }
 }
