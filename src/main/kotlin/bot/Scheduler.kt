@@ -6,6 +6,7 @@ import data.UserRepository
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.entity.channel.TextChannel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import models.toMatchHistory
 import util.MatchMessageGenerator
@@ -64,6 +65,8 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null)
 
                 val metadata = try {
                     client.getMatchByMatchID(finished.matchId)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     println("Metadata fetch error for match ${finished.matchId}: ${e.message}")
                     null
@@ -82,20 +85,41 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null)
                 }
 
                 try {
-                    UserRepository.updateLastMatch(finished.accountId, finished.matchId.toString())
-                    val channel = user.channelId?.let { kord.getChannelOf<TextChannel>(Snowflake(it)) }
-                    MatchMessageGenerator.generateRecentMatch(match, user.discordUser, channel, metadata)
-                    pending.remove(finished)
+                    deliverPendingMatch(
+                        finished, pending,
+                        resolveChannel = { user.channelId?.let { kord.getChannelOf<TextChannel>(Snowflake(it)) } },
+                        send = { channel -> MatchMessageGenerator.generateRecentMatch(match, user.discordUser, channel, metadata) },
+                        persist = { UserRepository.updateLastMatch(finished.accountId, finished.matchId.toString()) },
+                    )
                     println("Posted match ${finished.matchId} for ${finished.accountId}.")
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     println("Error posting match ${finished.matchId} for ${finished.accountId}: ${e.message}")
                     pending[finished] = (pending[finished] ?: 0) + 1
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             println("Scheduler cycle error: ${e.message}")
         }
 
         delay(POLL_INTERVAL_MS)
     }
+}
+
+
+/** Keep the match pending unless an accessible channel, send and persistence all succeed. */
+internal suspend fun <C : Any> deliverPendingMatch(
+    finished: FinishedMatch,
+    pending: MutableMap<FinishedMatch, Int>,
+    resolveChannel: suspend () -> C?,
+    send: suspend (C) -> Unit,
+    persist: () -> Unit,
+) {
+    val channel = requireNotNull(resolveChannel()) { "Notification channel is unavailable" }
+    send(channel)
+    persist()
+    pending.remove(finished)
 }

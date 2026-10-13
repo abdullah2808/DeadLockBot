@@ -1,5 +1,7 @@
 package bot
 
+import kotlinx.coroutines.CancellationException
+
 import api.DeadlockClient
 import models.ActiveMatchDTO
 
@@ -36,6 +38,8 @@ class ActiveFeedMatchSource(private val client: DeadlockClient) : MatchSource {
     override suspend fun pollFinished(trackedAccountIds: Set<String>): List<FinishedMatch> {
         val active = try {
             client.getActiveMatches()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             // Preserve state and report nothing: treating a failed fetch as "no
             // live matches" would falsely flag every in-progress match as finished.

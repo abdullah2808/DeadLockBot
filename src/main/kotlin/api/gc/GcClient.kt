@@ -23,6 +23,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFilePermissions
 import kotlin.concurrent.thread
 
 /** Supplies a player's recent match ids (newest first) — the seam a [bot.GcMatchSource] polls. */
@@ -113,9 +116,9 @@ class GcClient(
     }
 
     private fun onConnected() {
-        val storedToken = initialRefreshToken
-            ?: tokenFile.takeIf { it.exists() }?.readText()?.trim()?.ifBlank { null }
         try {
+            val storedToken = initialRefreshToken
+                ?: tokenFile.takeIf { it.exists() }?.readText()?.trim()?.ifBlank { null }
             if (storedToken != null) {
                 println("GC bot: logging in with stored refresh token.")
                 logOnWithToken(username, storedToken)
@@ -125,18 +128,17 @@ class GcClient(
                 val authDetails = AuthSessionDetails().apply {
                     username = this@GcClient.username
                     password = this@GcClient.password
-                    persistentSession = false
+                    persistentSession = true
                     authenticator = UserConsoleAuthenticator()
                 }
                 val authSession = steamClient.authentication.beginAuthSessionViaCredentials(authDetails).get()
                 val poll = authSession.pollingWaitForResult().get()
-                runCatching { tokenFile.writeText(poll.refreshToken) }.onSuccess {
-                    println("GC bot: saved refresh token to ${tokenFile.absolutePath}; set STEAM_REFRESH_TOKEN to it for headless runs.")
-                }
+                saveRefreshToken(tokenFile, poll.refreshToken)
+                println("GC bot: saved refresh token; ready for headless runs.")
                 logOnWithToken(poll.accountName, poll.refreshToken)
             }
         } catch (e: Exception) {
-            println("GC bot: login failed: ${e.message}")
+            println("GC bot: login failed (${e.javaClass.simpleName}).")
             runCatching { steamUser.logOff() }
         }
     }
@@ -224,5 +226,19 @@ class GcClient(
         )
         gamesPlayed.body.addGamesPlayedBuilder().setGameId(appId.toLong())
         steamClient.send(gamesPlayed)
+    }
+}
+
+/** Write privately, then replace the old token only after a complete write. */
+internal fun saveRefreshToken(file: File, token: String) {
+    val target = file.toPath().toAbsolutePath()
+    Files.createDirectories(target.parent)
+    val temp = Files.createTempFile(target.parent, ".steam-token-", ".tmp",
+        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
+    try {
+        Files.writeString(temp, token)
+        Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+    } finally {
+        Files.deleteIfExists(temp)
     }
 }

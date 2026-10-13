@@ -9,6 +9,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
@@ -170,6 +171,40 @@ class DeadlockClientTest {
     }
 
     @Test
+    fun `metadata error response is not deserialized as match data`() = runTest {
+        val client = mockClient {
+            respond(
+                content = """{"status":503,"error":"Failed to fetch data from Steam. Retry your request later."}""",
+                status = HttpStatusCode.ServiceUnavailable,
+                headers = headersOf(HttpHeaders.ContentType, "application/json")
+            )
+        }
+        val deadlockClient = DeadlockClient(client, retryDelayMillis = 0)
+
+        assertNull(deadlockClient.getMatchByMatchID(115696167L))
+    }
+
+    @Test
+    fun `metadata can succeed on a later polling attempt`() = runTest {
+        var attempts = 0
+        val client = mockClient {
+            if (++attempts == 1) {
+                respond("{}", HttpStatusCode.ServiceUnavailable)
+            } else {
+                respond(
+                    content = """{"match_info":{"match_id":99,"players":[]}}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+            }
+        }
+        val deadlockClient = DeadlockClient(client, retryDelayMillis = 0)
+
+        assertNull(deadlockClient.getMatchByMatchID(99L))
+        assertEquals(99L, deadlockClient.getMatchByMatchID(99L)?.matchInfo?.matchId)
+    }
+
+    @Test
     fun `getMatchByMatchID returns null instead of throwing on failure`() = runTest {
         val client = mockClient {
             respond(content = "not json", status = HttpStatusCode.InternalServerError)
@@ -182,15 +217,13 @@ class DeadlockClientTest {
     }
 
     @Test
-    fun `getMatchByMatchID returns null when the client is already closed`() = runTest {
+    fun `getMatchByMatchID propagates cancellation when the client is closed`() = runTest {
         val client = mockClient {
             respond(content = "not json", status = HttpStatusCode.OK)
         }
         val deadlockClient = DeadlockClient(client, retryDelayMillis = 0)
         deadlockClient.close()
 
-        val result = deadlockClient.getMatchByMatchID(999L)
-
-        assertNull(result)
+        assertFailsWith<CancellationException> { deadlockClient.getMatchByMatchID(999L) }
     }
 }

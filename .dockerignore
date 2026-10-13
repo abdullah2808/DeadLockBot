@@ -1,0 +1,13 @@
+.git
+.idea
+.gradle
+build
+.env
+.env.*
+!.env.example
+state
+backups
+steam_refresh_token*
+*.log
+*.pem
+*.key

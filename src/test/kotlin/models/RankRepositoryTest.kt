@@ -22,6 +22,13 @@ class RankRepositoryTest {
     }
 
     @Test
+    fun `rank lookup uses the tier instead of catalog ordering`() {
+        val ranks = listOf(rank(2, "two-1"), rank(1, "one-1"))
+
+        assertEquals("one-1", RankRepository.rankImageForBadge(11, ranks))
+    }
+
+    @Test
     fun `returns null instead of throwing when the badge's tier is out of range`() {
         val ranks = listOf(rank(0, "zero-1"))
 

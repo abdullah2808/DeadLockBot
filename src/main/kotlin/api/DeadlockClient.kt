@@ -1,7 +1,7 @@
 package api
 
+import kotlinx.coroutines.CancellationException
 
-import dev.kord.core.kordLogger
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
@@ -49,6 +49,8 @@ class DeadlockClient(
                 } else {
                     println("Unexpected status ${response.status} on attempt ${attempt + 1}. Retrying...")
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 lastError = e
                 println("Attempt ${attempt + 1} failed: ${e.message}")
@@ -92,6 +94,8 @@ class DeadlockClient(
                     else ->
                         println("Unexpected ${response.status} verifying $accountId.")
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 println("Verify attempt ${attempt + 1} for $accountId failed: ${e.message}")
             }
@@ -126,6 +130,8 @@ class DeadlockClient(
                     else ->
                         println("Unexpected ${response.status} on active-matches attempt ${attempt + 1}.")
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 lastError = e
                 println("active-matches attempt ${attempt + 1} failed: ${e.message}")
@@ -139,8 +145,16 @@ class DeadlockClient(
     suspend fun getMatchByMatchID(matchId: Long): MatchDTO? {
         val url = "https://api.deadlock-api.com/v1/matches/$matchId/metadata"
         return try {
-            client.get(url).body<MatchDTO>()
-        }  catch (e: Exception) {
+            val response = client.get(url)
+            if (response.status.isSuccess()) {
+                response.body<MatchDTO>()
+            } else {
+                println("Metadata unavailable for match $matchId (HTTP ${response.status.value}).")
+                null
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
             println("Error fetching match $matchId: ${e.message}")
             null
         }
