@@ -106,6 +106,17 @@ readiness. File write failures prevent claiming bootstrap success. The image
 currently runs as root, so a root-owned token may require sudo for chmod or
 backup. Protect the entire state directory and backups.
 
+## Steam account inputs
+
+`/signup` and `/recentmatch` accept a numeric account ID, a 17-digit individual
+SteamID64, a numeric Steam profile URL (`steamcommunity.com/profiles/...`), or
+a vanity profile URL (`steamcommunity.com/id/...`). Numeric inputs are converted
+locally. Vanity names resolve through Steam Community's public XML profile
+response with a ten-second timeout; no additional Steam Web API key is needed.
+If Steam cannot return the profile identity, use the numeric SteamID64/account
+ID or retry later. Signup still separately verifies Deadlock history, and stores
+the resolved numeric account ID so polling does not repeat vanity lookups.
+
 ## Updates and rollback
 
 After the PR is merged and main's publish job succeeds, bootstrap the updater

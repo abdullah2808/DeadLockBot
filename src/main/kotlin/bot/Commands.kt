@@ -1,6 +1,8 @@
 package bot
 
 import api.DeadlockClient
+import api.AccountResolution
+import api.SteamAccountResolver
 import api.gc.MatchHistoryProvider
 import kotlinx.coroutines.CancellationException
 import dev.kord.core.Kord
@@ -11,7 +13,6 @@ import data.UserRepository
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.rest.builder.interaction.string
-import util.AccountId
 import util.MatchMessageGenerator
 
 suspend fun registerCommands(kord: Kord) {
@@ -22,7 +23,7 @@ suspend fun registerCommands(kord: Kord) {
     kord.createGlobalChatInputCommand("unsubscribe", "Stop tracking your matches")
 
     kord.createGlobalChatInputCommand("recentmatch", "Get Your Most Recent Match") {
-        string("account_id", "Your Deadlock account ID") { required = true }
+        string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
     }
 
     kord.createGlobalChatInputCommand("lastfive", "Get Your Last Five Matches") {
@@ -51,14 +52,9 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction) {
     val discordUser = interaction.user.globalName ?: interaction.user.username
 
     // 1. Normalize the input (account id, SteamID64, or profile URL) and validate.
-    val accountId = AccountId.normalize(rawAccountId)
-    if (accountId == null) {
-        response.respond {
-            content = "⚠️ `$rawAccountId` doesn't look like a valid Deadlock account. " +
-                "Please enter your numeric account ID, your 17-digit SteamID64, or your Steam profile URL."
-        }
-        return
-    }
+    val accountId = resolveAccountInput(rawAccountId) { message ->
+        response.respond { content = message }
+    } ?: return
 
     // 2. Verify the account actually resolves against the Deadlock API before saving.
     val client = DeadlockClient()
@@ -97,11 +93,9 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction) {
 
 private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, kord: Kord, gc: MatchHistoryProvider?) {
     val response = interaction.deferEphemeralResponse()
-    val accountId = AccountId.normalize(interaction.command.strings["account_id"]!!)
-    if (accountId == null) {
-        response.respond { content = "Please enter a valid account ID, SteamID64, or Steam profile URL." }
-        return
-    }
+    val accountId = resolveAccountInput(interaction.command.strings["account_id"]!!) { message ->
+        response.respond { content = message }
+    } ?: return
     val client = DeadlockClient()
     try {
         val result = RecentMatchLookup(gc, client::getRecentMatch, client::getMatchByMatchID).lookup(accountId, 1)
@@ -125,6 +119,22 @@ private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, 
         response.respond { content = "I couldn't retrieve your latest match right now. Please try again later." }
     } finally {
         client.close()
+    }
+}
+
+private suspend fun resolveAccountInput(raw: String, onError: suspend (String) -> Unit): String? {
+    return when (val result = SteamAccountResolver().use { it.resolve(raw) }) {
+        is AccountResolution.Resolved -> result.accountId
+        AccountResolution.Invalid -> {
+            onError("Please enter a numeric account ID, a 17-digit SteamID64, or a Steam profile URL " +
+                "(`steamcommunity.com/profiles/...` or `steamcommunity.com/id/...`).")
+            null
+        }
+        AccountResolution.Unavailable -> {
+            onError("I couldn't resolve that Steam profile right now. Try again in a moment, " +
+                "or enter its numeric SteamID64/account ID.")
+            null
+        }
     }
 }
 
