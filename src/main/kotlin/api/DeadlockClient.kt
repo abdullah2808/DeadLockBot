@@ -9,6 +9,7 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.delay
@@ -19,7 +20,8 @@ import models.MatchHistoryDTO
 
 class DeadlockClient(
     private val client: HttpClient = defaultHttpClient(),
-    private val retryDelayMillis: Long = 10_000L
+    private val retryDelayMillis: Long = 10_000L,
+    private val metadataGate: MetadataRequestGate = sharedMetadataGate,
 ) {
 
     suspend fun getRecentMatch(accountId: String): List<MatchHistoryDTO> {
@@ -142,13 +144,16 @@ class DeadlockClient(
         throw RuntimeException("Failed to fetch active matches. Last error: ${lastError?.message ?: "unknown"}")
     }
 
-    suspend fun getMatchByMatchID(matchId: Long): MatchDTO? {
+    suspend fun getMatchByMatchID(matchId: Long): MatchDTO? = metadataGate.request(matchId) {
         val url = "https://api.deadlock-api.com/v1/matches/$matchId/metadata"
-        return try {
+        try {
             val response = client.get(url)
             if (response.status.isSuccess()) {
-                response.body<MatchDTO>()
+                response.body<MatchDTO>().also { metadataGate.succeeded() }
             } else {
+                if (response.status == HttpStatusCode.TooManyRequests) {
+                    metadataGate.rateLimited(response.headers[HttpHeaders.RetryAfter])
+                }
                 println("Metadata unavailable for match $matchId (HTTP ${response.status.value}).")
                 null
             }
@@ -165,6 +170,10 @@ class DeadlockClient(
     }
 
     companion object {
+        private var sharedMetadataGate = MetadataRequestGate()
+        fun configureMetadataCache(find: (Long) -> MatchDTO?, save: (MatchDTO) -> Unit) {
+            sharedMetadataGate = MetadataRequestGate(find = find, save = save)
+        }
         private fun defaultHttpClient(): HttpClient = HttpClient(CIO) {
             install(ContentNegotiation) {
                 json(Json {

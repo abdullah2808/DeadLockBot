@@ -1,10 +1,13 @@
 import api.gc.GcClient
+import api.gc.CachedMatchHistoryProvider
 import api.gc.MatchHistoryProvider
 import bot.handleCommands
 import bot.registerCommands
 import bot.startScheduler
 import bot.acceptNullableChannelApplicationIds
 import data.DatabaseFactory
+import data.MatchCacheRepository
+import api.DeadlockClient
 import dev.kord.core.Kord
 import dev.kord.gateway.DefaultGateway
 import dev.kord.gateway.ratelimit.IdentifyRateLimiter
@@ -22,6 +25,7 @@ import kotlinx.coroutines.launch
 
 suspend fun main() = coroutineScope {
     DatabaseFactory.init()
+    DeadlockClient.configureMetadataCache(MatchCacheRepository::findMetadata, MatchCacheRepository::saveMetadata)
     val kord = Kord(Env.DISCORD_TOKEN) {
         gateways { resources, shards ->
             val limiter = IdentifyRateLimiter(resources.maxConcurrency, defaultDispatcher)
@@ -34,9 +38,8 @@ suspend fun main() = coroutineScope {
         }
     }
     registerCommands(kord)
-    handleCommands(kord)
-
     val gcProvider: MatchHistoryProvider? = buildGcProvider()
+    handleCommands(kord, gcProvider)
     launch {
         startScheduler(kord, gcProvider)
     }
@@ -52,10 +55,10 @@ suspend fun main() = coroutineScope {
  */
 private fun buildGcProvider(): MatchHistoryProvider? {
     val username = Env.STEAM_USERNAME ?: return null
-    return GcClient(
+    return CachedMatchHistoryProvider(GcClient(
         username = username,
         password = Env.STEAM_PASSWORD,
         initialRefreshToken = Env.STEAM_REFRESH_TOKEN,
         tokenFile = java.io.File(Env.STEAM_TOKEN_FILE),
-    ).also { it.start() }
+    ).also { it.start() })
 }

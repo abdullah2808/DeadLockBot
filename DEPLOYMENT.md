@@ -106,7 +106,57 @@ readiness. File write failures prevent claiming bootstrap success. The image
 currently runs as root, so a root-owned token may require sudo for chmod or
 backup. Protect the entire state directory and backups.
 
+## Steam account inputs
+
+`/signup` and `/recentmatch` accept a numeric account ID, a 17-digit individual
+SteamID64, a numeric Steam profile URL (`steamcommunity.com/profiles/...`), or
+a vanity profile URL (`steamcommunity.com/id/...`). Numeric inputs are converted
+locally. Vanity names resolve through Steam Community's public XML profile
+response with a ten-second timeout; no additional Steam Web API key is needed.
+If Steam cannot return the profile identity, use the numeric SteamID64/account
+ID or retry later. Signup still separately verifies Deadlock history, and stores
+the resolved numeric account ID so polling does not repeat vanity lookups.
+
 ## Updates and rollback
+
+After the PR is merged and main's publish job succeeds, bootstrap the updater
+from your existing repository directory:
+
+```sh
+git fetch origin
+git switch main
+git pull --ff-only origin main
+python3 scripts/update.py
+```
+
+For subsequent registry updates, the only command is:
+
+```sh
+python3 scripts/update.py
+```
+
+The updater fetches main's SHA, downloads its published image before changing
+the running app, checks out matching configuration, and sets IMAGE_TAG itself.
+If publication is still pending or registry login is missing, it leaves the app
+running and asks you to retry. Authenticate to private GHCR once as described
+above. It requires an existing running app, Python 3, Git, Docker and Compose.
+Run it as your usual Docker-capable user. It leaves the checkout detached at the
+deployed SHA; use the updater again instead of git pull for registry deployments.
+
+It retains the previous image under a local rollback tag and detects startup
+exits/restarts over ten seconds. A failed update attempts automatic rollback.
+To roll back manually:
+
+```sh
+python3 scripts/update.py --rollback
+```
+
+Only IMAGE_TAG is changed in .env; other settings, database volumes, and Steam
+state are preserved. The rollback record contains no credentials and is stored
+under backups/deployment. Keep the previous local rollback image until the new
+version passes live acceptance. These checks verify the container stays running;
+inspect Steam/GC welcome and Discord notifications as well. Image rollback does
+not undo database migrations, so continue taking backups before updates.
 
 For PR testing before an image is published, use a local image tag in .env
 (`IMAGE_TAG=local-test`) and build the checked-out branch. The same commands
@@ -130,7 +180,17 @@ Failed refreshes retain the previous catalog; rank assets can be omitted during
 an outage. Existing Discord messages are not edited by a catalog refresh; rerun
 /lastfive to see updated names. An HTTP 503 fetching metadata means the upstream
 API could not retrieve that match from Steam, even if the bot's GC login succeeded.
-The scheduler retries metadata up to five times per pending match.
+GC match history supplies complete basic summaries when available. The bot
+retains up to 25 matches per account in PostgreSQL, sharing one match record and
+one metadata document across all participants, with separate player stat rows.
+Account trimming preserves matches referenced by another account. Scheduler and
+commands reuse GC snapshots for up to 30 seconds; successful metadata is also
+cached by match ID. /recentmatch and /lastfive use GC history when configured,
+and identify missing details instead of presenting stale API history as current.
+Basic notifications can be delivered without external metadata; damage/healing
+and team rank are optional enhancements. HTTP 429 honors Retry-After and a
+shared cooldown. Missing basic data remains pending with retry delays capped at
+15 minutes, rather than being discarded after five failures.
 
 Back up first. Record the current IMAGE_TAG privately. Pull the reviewed main
 configuration, then edit IMAGE_TAG to the new full SHA:
@@ -197,11 +257,12 @@ coordinate that separately rather than deleting the volume.
   App limit is 1 GiB with 512 MiB heap; DB limit is 512 MiB. Adjust only after
   measuring, leaving room for Mint, Chrome and VNC on the 8 GB host.
 
-GC discovers only the newest match per account; detailed metadata still comes
-from deadlock-api.com. Reconnect readiness and late-response correlation remain
+GC notifications discover only the newest match per account, while commands can
+show recent GC summaries. Detailed metadata still comes from deadlock-api.com.
+Reconnect readiness and late-response correlation remain
 known gaps. Sending before persistence can duplicate a notification if the
 process crashes or DB persistence fails after Discord accepts it; delivery is
-not exactly once. Missing metadata is retried five times; send errors retain the
+not exactly once. Missing basic data is retained for retry; send errors retain the
 pending match for retry. No Steam/Discord/API live checks are part of offline CI.
 
 ## Build verification

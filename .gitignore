@@ -52,5 +52,7 @@ steam_refresh_token*
 !.env.example
 state/
 backups/
+__pycache__/
+*.pyc
 *.pem
 *.key

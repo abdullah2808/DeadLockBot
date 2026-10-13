@@ -16,6 +16,8 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
       - run: bash gradlew test shadowJar --no-daemon
+      - name: Test deployment updater
+        run: python3 -m unittest discover -s scripts/tests -v
       - name: Validate Compose
         run: docker compose config --quiet
         env:

@@ -171,6 +171,64 @@ class DeadlockClientTest {
     }
 
     @Test
+    fun `completed metadata is fetched once across clients sharing a match`() = runTest {
+        var requests = 0
+        val client = mockClient {
+            requests++
+            respond("""{"match_info":{"match_id":99,"duration_s":1800,"winning_team":1,"players":[]}}""", HttpStatusCode.OK,
+                headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val gate = MetadataRequestGate()
+        val first = DeadlockClient(client, 0, gate)
+        val second = DeadlockClient(client, 0, gate)
+        assertEquals(99L, first.getMatchByMatchID(99)?.matchInfo?.matchId)
+        assertEquals(99L, second.getMatchByMatchID(99)?.matchInfo?.matchId)
+        assertEquals(1, requests)
+    }
+
+    @Test
+    fun `metadata honors Retry-After across clients sharing the same gate`() = runTest {
+        var now = 0L
+        var requests = 0
+        val gate = MetadataRequestGate(clock = { now })
+        val client = mockClient {
+            requests++
+            if (requests == 1) respond("{}", HttpStatusCode.TooManyRequests,
+                headersOf(HttpHeaders.RetryAfter, "120"))
+            else respond("""{"match_info":{"match_id":99,"players":[]}}""", HttpStatusCode.OK,
+                headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val first = DeadlockClient(client, 0, gate)
+        val second = DeadlockClient(client, 0, gate)
+
+        assertNull(first.getMatchByMatchID(99))
+        now = 119_000L
+        assertNull(second.getMatchByMatchID(99))
+        assertEquals(1, requests)
+        now = 120_000L
+        assertEquals(99L, second.getMatchByMatchID(99)?.matchInfo?.matchId)
+        assertEquals(2, requests)
+    }
+
+    @Test
+    fun `metadata rate limiting backs off when Retry-After is missing`() = runTest {
+        var now = 0L
+        var requests = 0
+        val client = mockClient { requests++; respond("{}", HttpStatusCode.TooManyRequests) }
+        val bot = DeadlockClient(client, 0, MetadataRequestGate(clock = { now }))
+
+        assertNull(bot.getMatchByMatchID(99))
+        now = 59_000L
+        assertNull(bot.getMatchByMatchID(99))
+        assertEquals(1, requests)
+        now = 60_000L
+        assertNull(bot.getMatchByMatchID(99))
+        now = 179_000L
+        assertNull(bot.getMatchByMatchID(99))
+        assertEquals(2, requests)
+    }
+
+    @Test
     fun `metadata error response is not deserialized as match data`() = runTest {
         val client = mockClient {
             respond(

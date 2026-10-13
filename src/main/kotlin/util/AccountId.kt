@@ -1,37 +1,43 @@
 package util
 
-/**
- * Normalizes the various ways a player might supply their Deadlock account:
- *  - the numeric Steam3 account id (what the API expects),
- *  - a 17-digit SteamID64,
- *  - or a full Steam profile URL (…/profiles/7656119XXXXXXXXXX).
- *
- * Returns the canonical Steam3 account id as a string, or null if the input
- * can't be interpreted as a valid account.
- */
-object AccountId {
-    // Steam converts between SteamID64 and the 32-bit account id with this offset.
-    private const val STEAM64_BASE = 76561197960265728L
+import java.net.URI
 
-    private val profileUrlRegex = Regex("""(?:profiles/)?(\d{17})""")
+/** Numeric inputs resolve locally; /id/ profile names require a Steam lookup. */
+object AccountId {
+    private const val STEAM64_BASE = 76561197960265728L
+    private const val MAX_ACCOUNT_ID = 4294967295L
+    private val digits = Regex("[0-9]+")
+    private val profilePath = Regex("/(profiles|id)/([A-Za-z0-9_.-]+)/?")
 
     fun normalize(raw: String): String? {
-        val trimmed = raw.trim()
+        val value = raw.trim().removeSurrounding("<", ">")
+        if (digits.matches(value)) return normalizeNumber(value)
+        val profile = profile(value) ?: return null
+        if (profile.groupValues[1] != "profiles") return null
+        val steamId = profile.groupValues[2]
+        return steamId.takeIf { it.length == 17 }?.let(::normalizeNumber)
+    }
 
-        // Pull a 17-digit SteamID64 out of a profile URL if one is present.
-        val extracted = profileUrlRegex.find(trimmed)?.groupValues?.get(1)
-        val value = extracted ?: trimmed
+    fun vanityName(raw: String): String? = profile(raw.trim().removeSurrounding("<", ">"))
+        ?.takeIf { it.groupValues[1] == "id" }
+        ?.groupValues?.get(2)
 
-        if (value.isEmpty() || value.any { !it.isDigit() }) return null
+    private fun normalizeNumber(value: String): String? {
+        if (!digits.matches(value)) return null
+        val number = value.toLongOrNull() ?: return null
+        val account = if (value.length == 17) number - STEAM64_BASE else number
+        return account.takeIf { it in 1..MAX_ACCOUNT_ID }?.toString()
+    }
 
-        val numeric = value.toLongOrNull() ?: return null
-
-        val accountId = if (value.length == 17 && numeric > STEAM64_BASE) {
-            numeric - STEAM64_BASE
-        } else {
-            numeric
-        }
-
-        return if (accountId > 0) accountId.toString() else null
+    private fun profile(raw: String): MatchResult? {
+        val withScheme = if (raw.startsWith("steamcommunity.com/", ignoreCase = true) ||
+            raw.startsWith("www.steamcommunity.com/", ignoreCase = true)) "https://$raw" else raw
+        val uri = try { URI(withScheme) } catch (_: Exception) { return null }
+        val scheme = uri.scheme?.lowercase() ?: return null
+        if (scheme != "https" && scheme != "http") return null
+        if (uri.host?.lowercase() !in setOf("steamcommunity.com", "www.steamcommunity.com") ||
+            uri.rawUserInfo != null ||
+            (uri.port != -1 && uri.port != if (scheme == "https") 443 else 80)) return null
+        return profilePath.matchEntire(uri.rawPath ?: "")
     }
 }

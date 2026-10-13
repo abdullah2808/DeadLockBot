@@ -57,6 +57,7 @@ message CMsgClientToGCGetMatchHistoryResponse {
         optional uint32 brawl_score_team0 = 23;
         optional uint32 brawl_score_team1 = 24;
         optional uint32 brawl_avg_round_time_s = 25;
+        optional int32 player_match_outcome = 26; // EPlayerMatchOutcome: invalid=0, win=1, loss=2
     }
 
     enum EResult {

@@ -22,7 +22,12 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import models.MatchHistoryDTO
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermissions
@@ -31,7 +36,12 @@ import kotlin.concurrent.thread
 /** Supplies a player's recent match ids (newest first) — the seam a [bot.GcMatchSource] polls. */
 interface MatchHistoryProvider {
     suspend fun recentMatchIds(accountId: String): List<Long>
+    suspend fun recentHistory(accountId: String): MatchHistorySnapshot =
+        MatchHistorySnapshot(recentMatchIds(accountId), emptyList())
+    suspend fun cachedMatch(accountId: String, matchId: Long): MatchHistoryDTO? = null
 }
+
+data class MatchHistorySnapshot(val ids: List<Long>, val summaries: List<MatchHistoryDTO>)
 
 /**
  * Talks to the Deadlock Game Coordinator via a logged-in Steam bot account
@@ -75,12 +85,14 @@ class GcClient(
 
     @Volatile private var running = false
     @Volatile private var gcWelcomed = false
-    private val welcome = CompletableDeferred<Unit>()
+    @Volatile private var welcome = CompletableDeferred<Unit>()
+    @Volatile private var connected = false
 
     // The GC response isn't tagged with the requested account_id, so only one
     // request is in flight at a time and its response completes [pending].
     private val requestMutex = Mutex()
-    @Volatile private var pending: CompletableDeferred<List<Long>>? = null
+    @Volatile private var pending: CompletableDeferred<MatchHistorySnapshot>? = null
+    @Volatile private var pendingAccount: String? = null
 
     /** Connects and runs the Steam callback loop on a daemon thread. Returns immediately. */
     fun start() {
@@ -102,20 +114,30 @@ class GcClient(
         runCatching { steamUser.logOff() }
     }
 
-    override suspend fun recentMatchIds(accountId: String): List<Long> = requestMutex.withLock {
-        // Block until the GC session is ready (bounded), then send + await the response.
-        withTimeout(REQUEST_TIMEOUT_MS) { welcome.await() }
-        val deferred = CompletableDeferred<List<Long>>()
-        pending = deferred
+    override suspend fun recentMatchIds(accountId: String): List<Long> = recentHistory(accountId).ids
+
+    override suspend fun recentHistory(accountId: String): MatchHistorySnapshot = requestMutex.withLock {
+        val deferred = CompletableDeferred<MatchHistorySnapshot>()
         try {
+            // A reconnect must receive a fresh welcome before querying again.
+            withTimeout(REQUEST_TIMEOUT_MS) { welcome.await() }
+            pending = deferred
+            pendingAccount = accountId
             sendGetMatchHistory(accountId)
             withTimeout(REQUEST_TIMEOUT_MS) { deferred.await() }
+        } catch (e: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            invalidateSession()
+            steamClient.disconnect()
+            throw IOException("GC history timed out; reconnecting before another query", e)
         } finally {
             pending = null
+            pendingAccount = null
         }
     }
 
     private fun onConnected() {
+        connected = true
         try {
             val storedToken = initialRefreshToken
                 ?: tokenFile.takeIf { it.exists() }?.readText()?.trim()?.ifBlank { null }
@@ -152,10 +174,19 @@ class GcClient(
     }
 
     private fun onDisconnected(callback: DisconnectedCallback) {
-        gcWelcomed = false
+        invalidateSession()
         if (running && !callback.isUserInitiated) {
             runCatching { Thread.sleep(3_000L); steamClient.connect() }
         }
+    }
+
+    private fun invalidateSession() {
+        connected = false
+        if (gcWelcomed || welcome.isCompleted) welcome = CompletableDeferred()
+        gcWelcomed = false
+        pending?.let { if (!it.isCompleted) it.completeExceptionally(IOException("Steam GC disconnected")) }
+        pending = null
+        pendingAccount = null
     }
 
     private fun onLoggedOn(callback: LoggedOnCallback) {
@@ -166,8 +197,9 @@ class GcClient(
         println("GC bot: logged on; establishing Deadlock GC session...")
         startPlayingGame(DEADLOCK_APP_ID)
         // Some GCs only welcome after repeated hellos; send until welcomed.
+        val readiness = welcome
         thread(name = "steam-gc-hello", isDaemon = true) {
-            while (running && !gcWelcomed) {
+            while (running && connected && !gcWelcomed && welcome === readiness) {
                 sendHello()
                 Thread.sleep(5_000L)
             }
@@ -175,7 +207,7 @@ class GcClient(
     }
 
     private fun onGcMessage(callback: MessageCallback) {
-        if (callback.appID != DEADLOCK_APP_ID) return
+        if (callback.appID != DEADLOCK_APP_ID || !connected) return
         when (callback.message.msgType) {
             MSG_GC_CLIENT_WELCOME -> {
                 if (!gcWelcomed) {
@@ -190,13 +222,16 @@ class GcClient(
                     callback.message,
                 )
                 val body = response.body
-                val ids = if (body.result == CitadelMatchHistory.CMsgClientToGCGetMatchHistoryResponse.EResult.k_eResult_Success) {
-                    body.matchesList.map { it.matchId }
+                val target = pending ?: return
+                val account = pendingAccount ?: return
+                if (body.result == CitadelMatchHistory.CMsgClientToGCGetMatchHistoryResponse.EResult.k_eResult_Success) {
+                    val summaries = body.matchesList.mapNotNull { it.toSummary(account) }
+                    println("GC history for $account: ${body.matchesCount} matches, ${summaries.size} complete summaries.")
+                    if (!target.isCompleted) target.complete(MatchHistorySnapshot(body.matchesList.map { it.matchId }, summaries))
                 } else {
                     println("GC bot: match-history response result=${body.result}")
-                    emptyList()
+                    if (!target.isCompleted) target.completeExceptionally(IllegalStateException("GC history unavailable: ${body.result}"))
                 }
-                pending?.let { if (!it.isCompleted) it.complete(ids) }
             }
         }
     }
