@@ -39,6 +39,7 @@ services:
       STEAM_PASSWORD: ${STEAM_PASSWORD:-}
       STEAM_REFRESH_TOKEN: ${STEAM_REFRESH_TOKEN:-}
       STEAM_TOKEN_FILE: ${STEAM_TOKEN_FILE:-/app/state/steam_refresh_token.txt}
+      STEAM_AUTO_ACCEPT_FRIENDS: ${STEAM_AUTO_ACCEPT_FRIENDS:-true}
       JAVA_TOOL_OPTIONS: "-Xms128m -Xmx512m -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError"
     volumes:
       - ./state:/app/state

@@ -26,6 +26,8 @@ data class Players (
     @SerialName("net_worth") val netWorth: Int = 0,
     @SerialName("last_hits") val lastHits: Int = 0,
     @SerialName("denies") val denies: Int = 0,
+    @SerialName("level") val heroLevel: Int = 0,
+    @SerialName("abandon_match_time_s") val abandonedTimeSeconds: Int? = null,
 )
 
 
@@ -38,6 +40,10 @@ data class MatchInfoDTO(
     // Nullable: live matches report null here; only populated once finished.
     @SerialName("duration_s") val durationSeconds: Int? = null,
     @SerialName("winning_team") val winningTeam: Int? = null,
+    @SerialName("game_mode") val gameMode: Int = 0,
+    @SerialName("match_mode") val matchMode: Int = 0,
+    @SerialName("objectives_mask_team0") val objectivesMaskTeam0: Long = 0,
+    @SerialName("objectives_mask_team1") val objectivesMaskTeam1: Long = 0,
     @SerialName(value = "players") val players: List<Players>
 )
 
@@ -50,8 +56,8 @@ data class MatchDTO(
 /**
  * Reconstructs a [MatchHistoryDTO] for a single player from full match metadata.
  * This lets the match-centric scheduler reuse the existing match-summary embed
- * without touching the stale per-player history endpoint. Fields the embed does
- * not use (game/match mode, hero level, objective masks) are defaulted.
+ * without touching the stale per-player history endpoint. Optional API fields
+ * default when absent; Valve metadata supplies modes, level and objective masks.
  *
  * Win/loss follows the existing convention in `MatchMessageGenerator`
  * (`matchResult == playerTeam` ⇒ win): here `matchResult` is the winning team
@@ -59,27 +65,28 @@ data class MatchDTO(
  * Returns null if the account isn't in the match or the id can't be parsed.
  */
 fun MatchDTO.toMatchHistory(accountId: String): MatchHistoryDTO? {
-    val acct = accountId.toIntOrNull() ?: return null
+    val acct = accountId.toLongOrNull()?.takeIf { it in 1..4294967295L }?.toInt() ?: return null
     val info = matchInfo
     val player = info.players.firstOrNull { it.accountId == acct } ?: return null
     return MatchHistoryDTO(
         accountId = player.accountId,
         denies = player.denies,
-        gameMode = 0,
+        gameMode = info.gameMode,
         heroId = player.heroId,
-        heroLevel = 0,
+        heroLevel = player.heroLevel,
         lastHits = player.lastHits,
         matchDurationSeconds = info.durationSeconds ?: 0,
         matchId = info.matchId,
-        matchMode = 0,
+        matchMode = info.matchMode,
         matchResult = info.winningTeam ?: -1,
         netWorth = player.netWorth,
-        objectivesMaskTeam0 = 0,
-        objectivesMaskTeam1 = 0,
+        objectivesMaskTeam0 = info.objectivesMaskTeam0,
+        objectivesMaskTeam1 = info.objectivesMaskTeam1,
         assists = player.assists,
         deaths = player.deaths,
         kills = player.kills,
         playerTeam = player.team,
         startTime = info.startTime,
+        abandonedTimeSeconds = player.abandonedTimeSeconds,
     )
 }

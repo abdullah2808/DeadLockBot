@@ -23,7 +23,8 @@ object MatchMessageGenerator {
     fun buildWelcomeEmbed(
         userName: String?,
         accountId: String,
-        recentMatch: MatchHistoryDTO?
+        recentMatch: MatchHistoryDTO?,
+        trackingNotice: String? = null,
     ): EmbedBuilder {
         val name = userName ?: "Player"
 
@@ -31,12 +32,16 @@ object MatchMessageGenerator {
             title = "🎉 Welcome, $name!"
             color = Color(0x1ABC9C)
             description = buildString {
-                appendLine("You're all set up for automatic Deadlock match tracking.")
+                appendLine(trackingNotice ?: "You're all set up for automatic Deadlock match tracking.")
                 appendLine()
                 appendLine("**Linked account:** `$accountId`")
                 if (recentMatch != null) {
                     val hero = HeroRepository.getHeroName(recentMatch.heroId)
-                    val result = if (recentMatch.matchResult == recentMatch.playerTeam) "🟩 Win" else "🟥 Loss"
+                    val result = when {
+                        recentMatch.matchResult !in 0..1 -> "⚪ Match completed"
+                        recentMatch.matchResult == recentMatch.playerTeam -> "🟩 Win"
+                        else -> "🟥 Loss"
+                    }
                     appendLine(
                         "**Most recent match:** $result as **$hero** " +
                             "(${recentMatch.kills}/${recentMatch.deaths}/${recentMatch.assists})"
@@ -82,8 +87,8 @@ object MatchMessageGenerator {
         val playerStats = additionalMatchInfo?.matchInfo?.players
             ?.firstOrNull { it.accountId == match.accountId }
             ?.stats
-        val playerDamage = playerStats?.get(playerStats.size - 1)?.playerDamage
-        val objectiveDamage = playerStats?.get(playerStats.size - 1)?.objectiveDamage
+        val playerDamage = playerStats?.lastOrNull()?.playerDamage
+        val objectiveDamage = playerStats?.lastOrNull()?.objectiveDamage
 
         // Result processing and message generation
         val resultEmoji : String
@@ -116,6 +121,12 @@ object MatchMessageGenerator {
             }
             objectiveDamage?.let {
                 appendLine("**Objective Damage**: $objectiveDamage")
+            }
+            playerStats?.lastOrNull()?.playerHealing?.takeIf { it > 0 }?.let {
+                appendLine("**Player Healing**: $it")
+            }
+            playerStats?.lastOrNull()?.damageAbsorbed?.takeIf { it > 0 }?.let {
+                appendLine("**Damage Absorbed**: $it")
             }
             appendLine("**Duration**: ${minutes}m ${seconds}s")
             appendLine()

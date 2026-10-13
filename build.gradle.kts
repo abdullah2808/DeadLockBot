@@ -34,6 +34,8 @@ dependencies {
     implementation("in.dragonbra:javasteam:1.8.0")
     implementation("org.bouncycastle:bcprov-jdk18on:1.84")
     implementation("com.google.protobuf:protobuf-java:4.35.1")
+    implementation("org.apache.commons:commons-compress:1.28.0")
+    implementation("com.github.luben:zstd-jni:1.5.7-23")
 
     testImplementation(kotlin("test-junit5"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

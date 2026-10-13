@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import models.MatchDTO
 import models.MatchHistoryDTO
+import models.toMatchHistory
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
@@ -42,6 +43,19 @@ object CachedPlayerMatchTable : Table("cached_player_matches") {
 
 object MatchCacheRepository {
     private val json = Json { ignoreUnknownKeys = true }
+    /** Full match data is shared; only registered participants get history references. */
+    fun saveEnrichedMetadata(match: MatchDTO, trackedAccounts: Set<String>): Unit = transaction {
+        for (player in match.matchInfo.players) {
+            val account = player.accountId.toUInt().toLong().toString()
+            if (account in trackedAccounts) {
+                match.toMatchHistory(account)?.let { summary ->
+                    // API fallback may omit these fields: preserve the authoritative GC summary.
+                    if (find(account, match.matchInfo.matchId) == null) save(account, listOf(summary))
+                }
+            }
+        }
+        saveMetadata(match)
+    }
     fun save(account: String, matches: List<MatchHistoryDTO>): Unit = transaction {
         for (match in matches.sortedByDescending { it.matchId }.take(25)) {
             CachedMatchTable.upsert(CachedMatchTable.matchId, onUpdateExclude = listOf(CachedMatchTable.metadata)) {

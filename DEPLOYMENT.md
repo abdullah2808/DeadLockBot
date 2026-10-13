@@ -188,9 +188,52 @@ commands reuse GC snapshots for up to 30 seconds; successful metadata is also
 cached by match ID. /recentmatch and /lastfive use GC history when configured,
 and identify missing details instead of presenting stale API history as current.
 Basic notifications can be delivered without external metadata; damage/healing
-and team rank are optional enhancements. HTTP 429 honors Retry-After and a
+and team rank are optional enhancements. Detailed metadata is requested from
+the GC first, downloaded from Valve's replay server, and decoded locally.
+The public API is a fallback. Its HTTP 429 honors Retry-After and a
 shared cooldown. Missing basic data remains pending with retry delays capped at
 15 minutes, rather than being discarded after five failures.
+
+### Steam friends and signup
+
+Use `/steambot` in Discord to get the signed-in bot's Steam profile button,
+friend code, and your friendship status. New players can run `/signup` with
+their Steam profile URL, then select **Open bot on Steam → Add Friend**. They
+can also send the request before signing up. If signup could not verify their
+account before acceptance, run `/signup` again afterward. Existing registrations
+do not need to be recreated.
+
+`STEAM_AUTO_ACCEPT_FRIENDS=true` is the default. The bot accepts incoming Steam
+requests for registered accounts and accounts that attempted `/signup` within
+the last 15 minutes. Unrelated requests stay pending. It never sends outgoing
+requests. To require manual acceptance instead, set this variable to `false` in
+`.env` and recreate app with `docker compose up -d --no-build app`.
+
+GC match access follows Deadlock's account privacy rules. Adding the bot has
+enabled access for the tested accounts, but friendship is not a guarantee for
+every privacy setting. A friend request does not change Steam or Deadlock
+privacy. `/recentmatch` and `/lastfive` explain denied GC access and show the
+bot profile instead of reporting a generic failure. Signup tries GC verification
+before relying on the public API.
+
+### Detailed match cache
+
+When a new match is detected, the GC supplies Valve's metadata download
+references. The bot supports both zstd and bzip2 files, validates the match ID,
+and bounds downloads to 8 MiB and decompressed data to 32 MiB. It stores the
+full participant summary and each player's final damage/healing stats as one
+shared metadata document. Other registered participants get history references
+to that same match, without a second metadata download. Accounts explicitly
+queried through GC history also retain their latest 25 summaries.
+
+If both metadata sources are unavailable, basic GC notifications still work.
+Enrichment retries continue in the background with a delay capped at 15 minutes,
+while the account is registered and the match remains in its retained history.
+At most two background retries run per polling cycle. Existing Discord posts
+are not edited; `/recentmatch` can show the enriched details once available.
+Completed documents are reused across participants, commands, and restarts.
+Only newly detected or explicitly requested matches trigger enrichment; the
+bot does not download all 50 history entries on every poll.
 
 Back up first. Record the current IMAGE_TAG privately. Pull the reviewed main
 configuration, then edit IMAGE_TAG to the new full SHA:
@@ -247,6 +290,12 @@ coordinate that separately rather than deleting the volume.
 - Confirm no host DB port: `docker compose port db 5432` should return no mapping.
 - GC logs show stored-token login and Deadlock welcome after a restart with no
   password. Steam authentication and wire behavior require this real account test.
+- `/steambot` shows the correct profile and friend code. Send a request from an
+  account that attempted signup and confirm automatic acceptance; an unrelated
+  request should remain pending. Check `Steam bot: ...` logs for acceptance.
+- For a newly finished game, confirm `Cached Valve GC metadata for match ...`
+  in logs and compare its damage stats with the game. Query a registered party
+  member's match and confirm the cached document is reused, including after restart.
 - Use /signup in an accessible Discord text channel; finish a real match and
   confirm the correct notification and persisted last_match_id. Polling is 90s
   plus metadata availability. Remove send permission, finish another match,
@@ -258,9 +307,10 @@ coordinate that separately rather than deleting the volume.
   measuring, leaving room for Mint, Chrome and VNC on the 8 GB host.
 
 GC notifications discover only the newest match per account, while commands can
-show recent GC summaries. Detailed metadata still comes from deadlock-api.com.
-Reconnect readiness and late-response correlation remain
-known gaps. Sending before persistence can duplicate a notification if the
+show recent GC summaries. GC history and metadata requests share one serialized
+session, match response types and echoed job IDs, and reconnect after an in-flight
+request times out or is cancelled. Untagged GC replies rely on serialization and
+connection reset. Sending before persistence can duplicate a notification if the
 process crashes or DB persistence fails after Discord accepts it; delivery is
 not exactly once. Missing basic data is retained for retry; send errors retain the
 pending match for retry. No Steam/Discord/API live checks are part of offline CI.
