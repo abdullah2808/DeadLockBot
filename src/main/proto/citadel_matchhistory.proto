@@ -31,6 +31,33 @@ message CMsgClientToGCGetMatchHistory {
     optional int32 match_mode = 5;  // ECitadelMatchMode
 }
 
+// GC message ids 9167 / 9168. Download references are scoped by Valve's permissions.
+message CMsgClientToGCGetMatchMetaData {
+    optional uint64 match_id = 1;
+    optional uint32 metadata_salt = 3;
+    optional uint32 target_account_id = 4;
+}
+
+message CMsgClientToGCGetMatchMetaDataResponse {
+    enum EResult {
+        k_eResult_InternalError = 0;
+        k_eResult_Success = 1;
+        k_eResult_InvalidPermission = 2;
+        k_eResult_TemporarilyDisabled = 3;
+        k_eResult_TooBusy = 4;
+        k_eResult_RateLimited = 5;
+        k_eResult_InvalidMatch = 6;
+        k_eResult_MatchInFlight = 7;
+        k_eResult_Timeout = 8;
+    }
+    optional EResult result = 1 [default = k_eResult_InternalError];
+    optional uint32 replay_salt = 2;
+    optional uint32 metadata_salt = 3;
+    optional uint32 replay_valid_through = 4;
+    optional uint32 replay_group_id = 5;
+    optional uint32 replay_processing_through = 6;
+}
+
 message CMsgClientToGCGetMatchHistoryResponse {
     message Match {
         optional uint64 match_id = 1;

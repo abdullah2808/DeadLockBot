@@ -8,11 +8,17 @@ import bot.acceptNullableChannelApplicationIds
 import data.DatabaseFactory
 import data.MatchCacheRepository
 import api.DeadlockClient
+import api.MatchMetadataService
+import api.gc.ValveMetadataClient
+import data.UserRepository
 import dev.kord.core.Kord
 import dev.kord.gateway.DefaultGateway
 import dev.kord.gateway.ratelimit.IdentifyRateLimiter
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 /*
  TODO:
@@ -25,7 +31,8 @@ import kotlinx.coroutines.launch
 
 suspend fun main() = coroutineScope {
     DatabaseFactory.init()
-    DeadlockClient.configureMetadataCache(MatchCacheRepository::findMetadata, MatchCacheRepository::saveMetadata)
+    // The shared service persists GC and API results through the same participant-aware cache.
+    DeadlockClient.configureMetadataCache(MatchCacheRepository::findMetadata) {}
     val kord = Kord(Env.DISCORD_TOKEN) {
         gateways { resources, shards ->
             val limiter = IdentifyRateLimiter(resources.maxConcurrency, defaultDispatcher)
@@ -39,12 +46,24 @@ suspend fun main() = coroutineScope {
     }
     registerCommands(kord)
     val gcProvider: MatchHistoryProvider? = buildGcProvider()
-    handleCommands(kord, gcProvider)
-    launch {
-        startScheduler(kord, gcProvider)
-    }
-    kord.login {
-        presence { playing("tracking Deadlock matches") }
+    gcProvider?.updateTrackedAccounts(UserRepository.getAllUsers().map { it.accountId }.toSet())
+    val apiClient = DeadlockClient()
+    val valveClient = ValveMetadataClient()
+    val metadata = MatchMetadataService(gcProvider, valveClient::download, apiClient::getMatchByMatchID,
+        find = MatchCacheRepository::findMetadata,
+        save = { MatchCacheRepository.saveEnrichedMetadata(it, UserRepository.getAllUsers().map { user -> user.accountId }.toSet()) },
+        knownMatch = { account, match -> MatchCacheRepository.find(account, match) != null })
+    handleCommands(kord, gcProvider, metadata)
+    val scheduler = launch { startScheduler(kord, gcProvider, metadata) }
+    try {
+        kord.login { presence { playing("tracking Deadlock matches") } }
+    } finally {
+        withContext(NonCancellable) {
+            scheduler.cancelAndJoin()
+            gcProvider?.close()
+            valveClient.close()
+            apiClient.close()
+        }
     }
 }
 
@@ -60,5 +79,6 @@ private fun buildGcProvider(): MatchHistoryProvider? {
         password = Env.STEAM_PASSWORD,
         initialRefreshToken = Env.STEAM_REFRESH_TOKEN,
         tokenFile = java.io.File(Env.STEAM_TOKEN_FILE),
+        autoAcceptFriends = Env.STEAM_AUTO_ACCEPT_FRIENDS,
     ).also { it.start() })
 }

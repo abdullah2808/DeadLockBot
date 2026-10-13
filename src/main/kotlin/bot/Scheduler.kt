@@ -1,6 +1,7 @@
 package bot
 
 import api.DeadlockClient
+import api.MatchMetadataService
 import api.gc.MatchHistoryProvider
 import data.UserRepository
 import dev.kord.common.entity.Snowflake
@@ -27,7 +28,7 @@ private const val POLL_INTERVAL_MS = 90_000L
  * discovered via the authoritative Deadlock Game Coordinator ([GcMatchSource]);
  * otherwise it falls back to the top-150 active feed ([ActiveFeedMatchSource]).
  */
-suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null) {
+suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null, metadataService: MatchMetadataService? = null) {
     val client = DeadlockClient()
     val source: MatchSource = if (gcProvider != null) {
         println("Match source: Deadlock Game Coordinator.")
@@ -42,69 +43,76 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null)
     val pending = mutableMapOf<FinishedMatch, Int>()
     val retries = MetadataRetrySchedule()
 
-    while (true) {
-        try {
-            val users = UserRepository.getAllUsers()
-            val usersByAccount = users.associateBy { it.accountId }
+    try {
+        while (true) {
+            try {
+                val users = UserRepository.getAllUsers()
+                val usersByAccount = users.associateBy { it.accountId }
+                gcProvider?.updateTrackedAccounts(usersByAccount.keys)
 
-            source.pollFinished(usersByAccount.keys).forEach { pending.putIfAbsent(it, 0) }
+                source.pollFinished(usersByAccount.keys).forEach { pending.putIfAbsent(it, 0) }
 
-            for (finished in pending.keys.toList()) {
-                val user = usersByAccount[finished.accountId]
-                if (user == null) {
-                    pending.remove(finished)          // no longer tracked
+                for (finished in pending.keys.toList()) {
+                    val user = usersByAccount[finished.accountId]
+                    if (user == null) {
+                        pending.remove(finished)          // no longer tracked
+                        retries.forget(finished)
+                        continue
+                    }
+                    if (finished.matchId.toString() == user.lastMatchId) {
+                        pending.remove(finished)          // already posted
+                        retries.forget(finished)
+                        continue
+                    }
+
+                    if (!retries.ready(finished)) continue
+
+                    val cachedSummary = gcProvider?.cachedMatch(finished.accountId, finished.matchId)
+
+                    val metadata = try {
+                        if (metadataService != null) metadataService.metadataFor(finished.accountId, finished.matchId)
+                        else client.getMatchByMatchID(finished.matchId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        println("Metadata fetch error for match ${finished.matchId}: ${e.message}")
+                        null
+                    }
+                    val match = cachedSummary ?: metadata?.toMatchHistory(finished.accountId)
+
+                    if (match == null) {
+                        val wait = deferPendingMetadata(finished, pending, retries)
+                        println("Waiting for metadata for match ${finished.matchId}; next attempt in ${wait / 1000}s.")
+                        continue
+                    }
                     retries.forget(finished)
-                    continue
-                }
-                if (finished.matchId.toString() == user.lastMatchId) {
-                    pending.remove(finished)          // already posted
-                    retries.forget(finished)
-                    continue
-                }
 
-                if (!retries.ready(finished)) continue
-
-                val cachedSummary = gcProvider?.cachedMatch(finished.accountId, finished.matchId)
-
-                val metadata = try {
-                    client.getMatchByMatchID(finished.matchId)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    println("Metadata fetch error for match ${finished.matchId}: ${e.message}")
-                    null
+                    try {
+                        deliverPendingMatch(
+                            finished, pending,
+                            resolveChannel = { user.channelId?.let { kord.getChannelOf<TextChannel>(Snowflake(it)) } },
+                            send = { channel -> MatchMessageGenerator.generateRecentMatch(match, user.discordUser, channel, metadata) },
+                            persist = { UserRepository.updateLastMatch(finished.accountId, finished.matchId.toString()) },
+                        )
+                        println("Posted match ${finished.matchId} for ${finished.accountId}.")
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        println("Error posting match ${finished.matchId} for ${finished.accountId}: ${e.message}")
+                        pending[finished] = (pending[finished] ?: 0) + 1
+                    }
                 }
-                val match = cachedSummary ?: metadata?.toMatchHistory(finished.accountId)
-
-                if (match == null) {
-                    val wait = deferPendingMetadata(finished, pending, retries)
-                    println("Waiting for metadata for match ${finished.matchId}; next attempt in ${wait / 1000}s.")
-                    continue
-                }
-                retries.forget(finished)
-
-                try {
-                    deliverPendingMatch(
-                        finished, pending,
-                        resolveChannel = { user.channelId?.let { kord.getChannelOf<TextChannel>(Snowflake(it)) } },
-                        send = { channel -> MatchMessageGenerator.generateRecentMatch(match, user.discordUser, channel, metadata) },
-                        persist = { UserRepository.updateLastMatch(finished.accountId, finished.matchId.toString()) },
-                    )
-                    println("Posted match ${finished.matchId} for ${finished.accountId}.")
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    println("Error posting match ${finished.matchId} for ${finished.accountId}: ${e.message}")
-                    pending[finished] = (pending[finished] ?: 0) + 1
-                }
+                metadataService?.retryPending(usersByAccount.keys)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                println("Scheduler cycle error: ${e.message}")
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            println("Scheduler cycle error: ${e.message}")
-        }
 
-        delay(POLL_INTERVAL_MS)
+            delay(POLL_INTERVAL_MS)
+        }
+    } finally {
+        client.close()
     }
 }
 

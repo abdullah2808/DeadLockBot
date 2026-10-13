@@ -1,0 +1,54 @@
+syntax = "proto2";
+option java_package = "gc.citadel";
+option java_outer_classname = "CitadelMetadata";
+
+// Wire-compatible subset of Valve's citadel_gcmessages_common.proto.
+// Unknown fields remain optional; field numbers and scalar wire types must stay unchanged.
+message CMsgMatchMetaData {
+    optional uint32 version = 1;
+    optional bytes match_details = 2;
+    optional uint64 match_id = 3;
+}
+
+message CMsgMatchMetaDataContents {
+    message PlayerStats {
+        optional uint32 time_stamp_s = 1;
+        optional uint32 kills = 14;
+        optional uint32 deaths = 15;
+        optional uint32 assists = 16;
+        optional uint32 player_damage = 21;
+        optional uint32 boss_damage = 23;
+        optional uint32 player_healing = 25;
+        optional uint32 damage_absorbed = 34;
+    }
+    message Players {
+        optional uint32 account_id = 1;
+        repeated PlayerStats stats = 5;
+        optional int32 team = 6 [default = 0];
+        optional uint32 kills = 8;
+        optional uint32 deaths = 9;
+        optional uint32 assists = 10;
+        optional uint32 net_worth = 11;
+        optional uint32 hero_id = 12;
+        optional uint32 last_hits = 13;
+        optional uint32 denies = 14;
+        optional uint32 level = 18;
+        optional uint32 abandon_match_time_s = 23;
+    }
+    message MatchInfo {
+        optional uint32 duration_s = 1;
+        optional int32 match_outcome = 2 [default = 0];
+        optional int32 winning_team = 3 [default = 0];
+        repeated Players players = 4;
+        optional uint32 start_time = 5;
+        optional uint64 match_id = 6;
+        optional int32 game_mode = 9;
+        optional int32 match_mode = 10;
+        optional uint64 objectives_mask_team0 = 17;
+        optional uint64 objectives_mask_team1 = 18;
+        optional uint32 average_badge_team0 = 23;
+        optional uint32 average_badge_team1 = 24;
+        optional bool not_scored = 27;
+    }
+    optional MatchInfo match_info = 2;
+}

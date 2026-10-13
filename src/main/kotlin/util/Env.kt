@@ -39,4 +39,7 @@ object Env {
     val STEAM_TOKEN_FILE: String = optional("STEAM_TOKEN_FILE") ?: "steam_refresh_token.txt"
 
     val STEAM_REFRESH_TOKEN: String? = optional("STEAM_REFRESH_TOKEN")
+    val STEAM_AUTO_ACCEPT_FRIENDS: Boolean = optional("STEAM_AUTO_ACCEPT_FRIENDS")?.let {
+        it.lowercase().toBooleanStrictOrNull() ?: error("STEAM_AUTO_ACCEPT_FRIENDS must be true or false")
+    } ?: true
 }

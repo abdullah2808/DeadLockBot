@@ -4,6 +4,9 @@ import api.DeadlockClient
 import api.AccountResolution
 import api.SteamAccountResolver
 import api.gc.MatchHistoryProvider
+import api.gc.GcHistoryPermissionException
+import api.gc.SteamFriendship
+import api.MatchMetadataService
 import kotlinx.coroutines.CancellationException
 import dev.kord.core.Kord
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
@@ -21,6 +24,7 @@ suspend fun registerCommands(kord: Kord) {
     }
 
     kord.createGlobalChatInputCommand("unsubscribe", "Stop tracking your matches")
+    kord.createGlobalChatInputCommand("steambot", "Add the Steam bot and check your friend status")
 
     kord.createGlobalChatInputCommand("recentmatch", "Get Your Most Recent Match") {
         string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
@@ -31,19 +35,27 @@ suspend fun registerCommands(kord: Kord) {
 
 }
 
-suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null) {
+suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null, metadata: MatchMetadataService? = null) {
     kord.on<ChatInputCommandInteractionCreateEvent> {
         val interaction = interaction
         when (interaction.command.rootName) {
-            "signup" -> handleSignup(interaction)
+            "signup" -> handleSignup(interaction, gcProvider)
+            "steambot" -> {
+                val account = UserRepository.selectUserByDiscordID(interaction.user.id.toString())?.accountId
+                gcProvider?.updateTrackedAccounts(UserRepository.getAllUsers().map { it.accountId }.toSet())
+                interaction.deferEphemeralResponse().respond {
+                    content = steamOnboarding(gcProvider, account)
+                    steamBotButton(gcProvider)
+                }
+            }
             "unsubscribe" -> handleUnsubscribe(interaction)
-            "recentmatch" -> handleRecentMatch(interaction, kord, gcProvider)
-            "lastfive" -> handleLastFive(interaction, kord, gcProvider)
+            "recentmatch" -> handleRecentMatch(interaction, kord, gcProvider, metadata)
+            "lastfive" -> handleLastFive(interaction, kord, gcProvider, metadata)
         }
     }
 }
 
-private suspend fun handleSignup(interaction: ChatInputCommandInteraction) {
+private suspend fun handleSignup(interaction: ChatInputCommandInteraction, gc: MatchHistoryProvider?) {
     val response = interaction.deferPublicResponse()
 
     val rawAccountId = interaction.command.strings["account_id"]!!
@@ -56,10 +68,10 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction) {
         response.respond { content = message }
     } ?: return
 
-    // 2. Verify the account actually resolves against the Deadlock API before saving.
+    // 2. GC verification is freshest; retain the API as a signup fallback.
     val client = DeadlockClient()
     val matches = try {
-        client.verifyAccount(accountId)
+        verifySignupAccount(accountId, gc, client::verifyAccount)
     } finally {
         client.close()
     }
@@ -67,7 +79,9 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction) {
     if (matches == null) {
         response.respond {
             content = "❌ I couldn't verify Deadlock account `$accountId` right now. " +
-                "Double-check the ID and try again in a moment."
+                "Double-check the ID and try again in a moment." +
+                (gc?.let { "\n\n${steamOnboarding(it, accountId)}" } ?: "")
+            steamBotButton(gc)
         }
         return
     }
@@ -75,15 +89,22 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction) {
     // 3. Register the user and respond based on the outcome.
     when (UserRepository.addUser(discordId, accountId, channelId, discordUser)) {
         UserRepository.SignupOutcome.REGISTERED -> {
+            gc?.updateTrackedAccounts(UserRepository.getAllUsers().map { it.accountId }.toSet())
             val recentMatch = matches.firstOrNull()
             response.respond {
                 embeds = mutableListOf(
-                    MatchMessageGenerator.buildWelcomeEmbed(discordUser, accountId, recentMatch)
+                    MatchMessageGenerator.buildWelcomeEmbed(discordUser, accountId, recentMatch,
+                        if (gc != null && gc.friendship(accountId) != SteamFriendship.FRIEND)
+                            "Your account is linked. Add the Steam bot to enable GC match access if your Deadlock privacy requires it." else null)
                 )
+                if (gc != null) content = steamOnboarding(gc, accountId)
+                steamBotButton(gc)
             }
         }
         UserRepository.SignupOutcome.ALREADY_REGISTERED -> response.respond {
-            content = "⚠️ You're already registered. Use `/unsubscribe` first if you want to change your account ID."
+            content = "⚠️ You're already registered. Use `/unsubscribe` first if you want to change your account ID." +
+                (gc?.let { "\n\n${steamOnboarding(it, UserRepository.selectUserByDiscordID(discordId)?.accountId)}" } ?: "")
+            steamBotButton(gc)
         }
         UserRepository.SignupOutcome.ACCOUNT_ID_IN_USE -> response.respond {
             content = "⚠️ Deadlock account `$accountId` is already being tracked by someone else."
@@ -91,14 +112,17 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction) {
     }
 }
 
-private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, kord: Kord, gc: MatchHistoryProvider?) {
+private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, kord: Kord, gc: MatchHistoryProvider?, metadata: MatchMetadataService?) {
     val response = interaction.deferEphemeralResponse()
     val accountId = resolveAccountInput(interaction.command.strings["account_id"]!!) { message ->
         response.respond { content = message }
     } ?: return
     val client = DeadlockClient()
     try {
-        val result = RecentMatchLookup(gc, client::getRecentMatch, client::getMatchByMatchID).lookup(accountId, 1)
+        val fetchMetadata: suspend (Long) -> models.MatchDTO? = { id ->
+            if (metadata != null) metadata.metadataFor(accountId, id) else client.getMatchByMatchID(id)
+        }
+        val result = RecentMatchLookup(gc, client::getRecentMatch, fetchMetadata).lookup(accountId, 1)
         val match = result.matches.firstOrNull()
         if (match == null) {
             response.respond {
@@ -108,10 +132,15 @@ private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, 
             }
             return
         }
-        val info = result.metadata[match.matchId] ?: client.getMatchByMatchID(match.matchId)
+        val info = result.metadata[match.matchId] ?: fetchMetadata(match.matchId)
         val channel = requireNotNull(kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(interaction.channelId))
         MatchMessageGenerator.generateRecentMatch(match, interaction.user.globalName, channel, info)
         response.respond { content = "✅ Fetched match `${match.matchId}` for `$accountId`." }
+    } catch (e: GcHistoryPermissionException) {
+        response.respond {
+            content = "Deadlock GC denied match access for `$accountId`.\n\n${steamOnboarding(gc, accountId)}"
+            steamBotButton(gc)
+        }
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
@@ -146,7 +175,7 @@ private suspend fun handleUnsubscribe(interaction: ChatInputCommandInteraction) 
     }
 }
 
-private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kord: Kord, gc: MatchHistoryProvider?) {
+private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kord: Kord, gc: MatchHistoryProvider?, metadata: MatchMetadataService?) {
     val response = interaction.deferEphemeralResponse()
     val discordId = interaction.user.id.toString()
     val user = UserRepository.selectUserByDiscordID(discordId)
@@ -159,7 +188,9 @@ private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kor
 
     val client = DeadlockClient()
     try {
-        val result = RecentMatchLookup(gc, client::getRecentMatch, client::getMatchByMatchID).lookup(user.accountId, 5)
+        val result = RecentMatchLookup(gc, client::getRecentMatch, { id ->
+            if (metadata != null) metadata.metadataFor(user.accountId, id) else client.getMatchByMatchID(id)
+        }).lookup(user.accountId, 5)
         val waiting = result.unavailableIds.takeIf { it.isNotEmpty() }?.joinToString { "`$it`" }
         val notice = waiting?.let { "Waiting for match details: $it. Some recent matches are not shown yet." }
         if (result.matches.isEmpty()) {
@@ -169,6 +200,11 @@ private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kor
         val channel = requireNotNull(kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(Snowflake(user.channelId.toString())))
         MatchMessageGenerator.generateLastFive(result.matches, user.discordUser, channel, notice)
         response.respond { content = notice ?: "✅ Fetched your recent matches." }
+    } catch (e: GcHistoryPermissionException) {
+        response.respond {
+            content = "Deadlock GC denied match access for `${user.accountId}`.\n\n${steamOnboarding(gc, user.accountId)}"
+            steamBotButton(gc)
+        }
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
