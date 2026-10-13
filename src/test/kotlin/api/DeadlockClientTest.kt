@@ -9,6 +9,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
@@ -182,15 +183,13 @@ class DeadlockClientTest {
     }
 
     @Test
-    fun `getMatchByMatchID returns null when the client is already closed`() = runTest {
+    fun `getMatchByMatchID propagates cancellation when the client is closed`() = runTest {
         val client = mockClient {
             respond(content = "not json", status = HttpStatusCode.OK)
         }
         val deadlockClient = DeadlockClient(client, retryDelayMillis = 0)
         deadlockClient.close()
 
-        val result = deadlockClient.getMatchByMatchID(999L)
-
-        assertNull(result)
+        assertFailsWith<CancellationException> { deadlockClient.getMatchByMatchID(999L) }
     }
 }

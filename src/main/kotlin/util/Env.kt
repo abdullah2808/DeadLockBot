@@ -36,5 +36,7 @@ object Env {
     // A previously-issued refresh token. Preferred for headless/deployed runs so
     // no interactive Steam Guard prompt is needed. See GcClient for how the token
     // is obtained and persisted on first login.
+    val STEAM_TOKEN_FILE: String = optional("STEAM_TOKEN_FILE") ?: "steam_refresh_token.txt"
+
     val STEAM_REFRESH_TOKEN: String? = optional("STEAM_REFRESH_TOKEN")
 }

@@ -46,4 +46,11 @@ bin/
 
 ### Secrets / local config ###
 .env
-steam_refresh_token.txt
+steam_refresh_token*
+
+.env.*
+!.env.example
+state/
+backups/
+*.pem
+*.key

@@ -1,6 +1,7 @@
 package bot
 
 import api.gc.MatchHistoryProvider
+import kotlinx.coroutines.CancellationException
 
 /**
  * [MatchSource] backed by the Deadlock Game Coordinator ([MatchHistoryProvider]).
@@ -22,6 +23,8 @@ class GcMatchSource(private val provider: MatchHistoryProvider) : MatchSource {
         for (accountId in trackedAccountIds) {
             val newest = try {
                 provider.recentMatchIds(accountId).firstOrNull()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 println("GC match-history lookup failed for $accountId: ${e.message}")
                 null

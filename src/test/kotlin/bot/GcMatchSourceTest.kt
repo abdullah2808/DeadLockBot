@@ -1,6 +1,8 @@
 package bot
 
 import api.gc.MatchHistoryProvider
+import kotlinx.coroutines.CancellationException
+import kotlin.test.assertFailsWith
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -61,5 +63,14 @@ class GcMatchSourceTest {
         assertTrue(source.pollFinished(emptySet()).isEmpty())
         // Re-added → same newest id is emitted again.
         assertEquals(listOf(FinishedMatch("107", 200L)), source.pollFinished(setOf("107")))
+    }
+    @Test
+    fun `cancellation is propagated from provider`() = runTest {
+        val source = GcMatchSource(object : MatchHistoryProvider {
+            override suspend fun recentMatchIds(accountId: String): List<Long> {
+                throw CancellationException()
+            }
+        })
+        assertFailsWith<CancellationException> { source.pollFinished(setOf("107")) }
     }
 }

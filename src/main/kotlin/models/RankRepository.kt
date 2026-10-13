@@ -23,10 +23,10 @@ data class Rank(
 )
 
 object RankRepository {
-    val json = URL("https://assets.deadlock-api.com/v2/ranks").readText()
-    val ranks = Json {
-        ignoreUnknownKeys = true
-    }.decodeFromString<List<Rank>>(json)
+    val json: String by lazy { URL("https://assets.deadlock-api.com/v2/ranks").readText() }
+    val ranks: List<Rank> by lazy {
+        Json { ignoreUnknownKeys = true }.decodeFromString<List<Rank>>(json)
+    }
 
 
     fun getRankImage(matchHistory: MatchHistoryDTO, additionalMatchInfo: MatchDTO?): String? {

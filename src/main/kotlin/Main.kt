@@ -39,13 +39,10 @@ suspend fun main() = coroutineScope {
  */
 private fun buildGcProvider(): MatchHistoryProvider? {
     val username = Env.STEAM_USERNAME ?: return null
-    if (Env.STEAM_PASSWORD == null && Env.STEAM_REFRESH_TOKEN == null) {
-        println("STEAM_USERNAME set but no STEAM_PASSWORD or STEAM_REFRESH_TOKEN; skipping GC source.")
-        return null
-    }
     return GcClient(
         username = username,
         password = Env.STEAM_PASSWORD,
         initialRefreshToken = Env.STEAM_REFRESH_TOKEN,
+        tokenFile = java.io.File(Env.STEAM_TOKEN_FILE),
     ).also { it.start() }
 }
