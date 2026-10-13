@@ -16,6 +16,7 @@ uname -m
 free -h
 df -h / /home /srv/data/docker
 docker info --format '{{.DockerRootDir}}'
+containerd config dump | grep '^root'
 docker compose version
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
 ```
@@ -24,7 +25,13 @@ Check `gh auth status` if using GitHub CLI on nas. Stop any older bot instance
 elsewhere (for example Railway) before starting this one to avoid duplicate posts.
 Leave the Cinnamon/Chrome/Claude Desktop session alone.
 
-Confirm Docker data is on the HDD at /srv/data/docker. Keep application files,
+Confirm Docker data is on the HDD at /srv/data/docker.
+On installations using the containerd image store, its root must also be on the
+HDD (for example /srv/data/containerd). Docker's data-root does not relocate it.
+If pulls fail under /var/lib/containerd with no space left, inspect both storage
+paths before retrying; do not remove runtime data to make room.
+
+Keep application files,
 state and backups under /srv/data/stacks (backed by /home/srv), not the nearly full OS disk. The reported
 8 reallocated HDD sectors warrant monitoring and off-host backups; do not keep
 the only backup on that HDD. This session did not inspect or change nas.
@@ -100,6 +107,30 @@ currently runs as root, so a root-owned token may require sudo for chmod or
 backup. Protect the entire state directory and backups.
 
 ## Updates and rollback
+
+For PR testing before an image is published, use a local image tag in .env
+(`IMAGE_TAG=local-test`) and build the checked-out branch. The same commands
+apply when updating a local test installation after pulling new commits:
+
+```sh
+git pull --ff-only
+docker compose config --quiet
+docker compose build app
+docker compose up -d --no-build app
+docker compose logs --tail=100 app
+```
+
+To start an existing installation, run `docker compose up -d --no-build` from
+its repository directory. To stop only the bot, use `docker compose stop app`.
+The saved Steam token and database survive these operations.
+
+Hero and rank catalogs use https://api.deadlock-api.com/v1/assets. They refresh
+after six hours, or when an ID is missing with at most one request per minute.
+Failed refreshes retain the previous catalog; rank assets can be omitted during
+an outage. Existing Discord messages are not edited by a catalog refresh; rerun
+/lastfive to see updated names. An HTTP 503 fetching metadata means the upstream
+API could not retrieve that match from Steam, even if the bot's GC login succeeded.
+The scheduler retries metadata up to five times per pending match.
 
 Back up first. Record the current IMAGE_TAG privately. Pull the reviewed main
 configuration, then edit IMAGE_TAG to the new full SHA:

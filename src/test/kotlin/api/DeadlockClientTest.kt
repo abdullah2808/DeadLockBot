@@ -171,6 +171,40 @@ class DeadlockClientTest {
     }
 
     @Test
+    fun `metadata error response is not deserialized as match data`() = runTest {
+        val client = mockClient {
+            respond(
+                content = """{"status":503,"error":"Failed to fetch data from Steam. Retry your request later."}""",
+                status = HttpStatusCode.ServiceUnavailable,
+                headers = headersOf(HttpHeaders.ContentType, "application/json")
+            )
+        }
+        val deadlockClient = DeadlockClient(client, retryDelayMillis = 0)
+
+        assertNull(deadlockClient.getMatchByMatchID(115696167L))
+    }
+
+    @Test
+    fun `metadata can succeed on a later polling attempt`() = runTest {
+        var attempts = 0
+        val client = mockClient {
+            if (++attempts == 1) {
+                respond("{}", HttpStatusCode.ServiceUnavailable)
+            } else {
+                respond(
+                    content = """{"match_info":{"match_id":99,"players":[]}}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+            }
+        }
+        val deadlockClient = DeadlockClient(client, retryDelayMillis = 0)
+
+        assertNull(deadlockClient.getMatchByMatchID(99L))
+        assertEquals(99L, deadlockClient.getMatchByMatchID(99L)?.matchInfo?.matchId)
+    }
+
+    @Test
     fun `getMatchByMatchID returns null instead of throwing on failure`() = runTest {
         val client = mockClient {
             respond(content = "not json", status = HttpStatusCode.InternalServerError)

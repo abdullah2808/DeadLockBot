@@ -3,8 +3,6 @@ package models
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import java.net.URL
 
 @Serializable
 data class RankImages(
@@ -23,10 +21,9 @@ data class Rank(
 )
 
 object RankRepository {
-    val json: String by lazy { URL("https://assets.deadlock-api.com/v2/ranks").readText() }
-    val ranks: List<Rank> by lazy {
-        Json { ignoreUnknownKeys = true }.decodeFromString<List<Rank>>(json)
-    }
+    private val catalog = AssetCatalog(load = {
+        assetJson.decodeFromString<List<Rank>>(readAssetCatalog("ranks")).associateBy { it.tier }
+    })
 
 
     fun getRankImage(matchHistory: MatchHistoryDTO, additionalMatchInfo: MatchDTO?): String? {
@@ -35,7 +32,8 @@ object RankRepository {
             0 -> additionalMatchInfo?.matchInfo?.averageBadgeTeam0 ?: 0
             else -> 0
         }
-        return rankImageForBadge(avgTeamRank, ranks)
+        val rank = catalog.get(avgTeamRank / 10) ?: return null
+        return rankImageForBadge(avgTeamRank, listOf(rank))
     }
 
     // Pure and bounds-safe so it can be unit tested without a network call, and so an
@@ -43,7 +41,7 @@ object RankRepository {
     fun rankImageForBadge(avgTeamRank: Int, ranks: List<Rank>): String? {
         val tier = avgTeamRank / 10
         val subrank = avgTeamRank % 10
-        val rank = ranks.getOrNull(tier) ?: return null
+        val rank = ranks.firstOrNull { it.tier == tier } ?: return null
         return when (subrank) {
             1 -> rank.images?.smallSubRankOne
             2 -> rank.images?.smallSubRankTwo

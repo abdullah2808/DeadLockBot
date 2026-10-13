@@ -4,11 +4,11 @@ import dev.kord.common.Color
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.entity.channel.TextChannel
 import dev.kord.rest.builder.message.EmbedBuilder
-import dev.kord.rest.builder.message.create.embed
+import dev.kord.rest.builder.message.embed
 import models.HeroRepository
 import models.MatchHistoryDTO
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import models.MatchDTO
 import models.RankRepository
 

@@ -2,7 +2,6 @@ package api
 
 import kotlinx.coroutines.CancellationException
 
-import dev.kord.core.kordLogger
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
@@ -146,7 +145,13 @@ class DeadlockClient(
     suspend fun getMatchByMatchID(matchId: Long): MatchDTO? {
         val url = "https://api.deadlock-api.com/v1/matches/$matchId/metadata"
         return try {
-            client.get(url).body<MatchDTO>()
+            val response = client.get(url)
+            if (response.status.isSuccess()) {
+                response.body<MatchDTO>()
+            } else {
+                println("Metadata unavailable for match $matchId (HTTP ${response.status.value}).")
+                null
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

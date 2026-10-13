@@ -3,8 +3,11 @@ import api.gc.MatchHistoryProvider
 import bot.handleCommands
 import bot.registerCommands
 import bot.startScheduler
+import bot.acceptNullableChannelApplicationIds
 import data.DatabaseFactory
 import dev.kord.core.Kord
+import dev.kord.gateway.DefaultGateway
+import dev.kord.gateway.ratelimit.IdentifyRateLimiter
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
@@ -19,7 +22,17 @@ import kotlinx.coroutines.launch
 
 suspend fun main() = coroutineScope {
     DatabaseFactory.init()
-    val kord = Kord(Env.DISCORD_TOKEN)
+    val kord = Kord(Env.DISCORD_TOKEN) {
+        gateways { resources, shards ->
+            val limiter = IdentifyRateLimiter(resources.maxConcurrency, defaultDispatcher)
+            shards.map {
+                DefaultGateway {
+                    client = resources.httpClient
+                    identifyRateLimiter = limiter
+                }.acceptNullableChannelApplicationIds()
+            }
+        }
+    }
     registerCommands(kord)
     handleCommands(kord)
 
