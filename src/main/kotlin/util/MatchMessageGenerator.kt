@@ -76,7 +76,7 @@ object MatchMessageGenerator {
         val thumbnailImage = HeroRepository.getHeroMinimapImage(match.heroId)
 
         // Rank repo info
-        val rankImage = RankRepository.getRankImage(match, additionalMatchInfo)
+        val rankImage = additionalMatchInfo?.let { RankRepository.getRankImage(match, it) }
 
         // Damage Info
         val playerStats = additionalMatchInfo?.matchInfo?.players
@@ -89,6 +89,10 @@ object MatchMessageGenerator {
         val resultEmoji : String
         val matchColor : Color
          when  {
+             match.matchResult !in 0..1 -> {
+                resultEmoji = "⚔️ **Match completed**"
+                matchColor = Color(0x3498db)
+             }
              match.matchResult == match.playerTeam -> {
                 resultEmoji = " **Won a Match!**  🏆🏆🏆"
                 matchColor = Color(0x1ABC9C)
@@ -139,14 +143,21 @@ object MatchMessageGenerator {
     suspend fun generateLastFive(
         matches: List<MatchHistoryDTO>,
         userName: String?,
-        channel: TextChannel?, ) {
+        channel: TextChannel?,
+        notice: String? = null,
+    ) {
         val topMatches = matches.take(5)
 
         val messageDescription : String = buildString {
+            notice?.let { appendLine(it); appendLine() }
             for (match in topMatches) {
                 val hero = HeroRepository.getHeroName(match.heroId)
 
-                val color = if (match.matchResult == match.playerTeam) "🟩" else "🟥"
+                val color = when {
+                    match.matchResult !in 0..1 -> "⚪"
+                    match.matchResult == match.playerTeam -> "🟩"
+                    else -> "🟥"
+                }
 
                 val duration = match.matchDurationSeconds.seconds
                 val minutes = duration.inWholeMinutes

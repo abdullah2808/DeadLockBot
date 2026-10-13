@@ -16,10 +16,6 @@ import util.MatchMessageGenerator
 // benefits from a slightly shorter loop.
 private const val POLL_INTERVAL_MS = 90_000L
 
-// A just-finished match's metadata can lag a little behind the active feed, so we
-// retry a bounded number of times before giving up on it.
-private const val MAX_METADATA_ATTEMPTS = 5
-
 /**
  * Match-centric tracking loop. Each cycle asks the [MatchSource] which tracked
  * accounts finished a match, then fetches that match's (fresh) metadata, maps the
@@ -44,6 +40,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null)
     // Matches awaiting a successful post (metadata not ready yet, or a transient
     // post error), with their attempt counts.
     val pending = mutableMapOf<FinishedMatch, Int>()
+    val retries = MetadataRetrySchedule()
 
     while (true) {
         try {
@@ -56,12 +53,18 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null)
                 val user = usersByAccount[finished.accountId]
                 if (user == null) {
                     pending.remove(finished)          // no longer tracked
+                    retries.forget(finished)
                     continue
                 }
                 if (finished.matchId.toString() == user.lastMatchId) {
                     pending.remove(finished)          // already posted
+                    retries.forget(finished)
                     continue
                 }
+
+                if (!retries.ready(finished)) continue
+
+                val cachedSummary = gcProvider?.cachedMatch(finished.accountId, finished.matchId)
 
                 val metadata = try {
                     client.getMatchByMatchID(finished.matchId)
@@ -71,18 +74,14 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null)
                     println("Metadata fetch error for match ${finished.matchId}: ${e.message}")
                     null
                 }
-                val match = metadata?.toMatchHistory(finished.accountId)
+                val match = cachedSummary ?: metadata?.toMatchHistory(finished.accountId)
 
-                if (metadata == null || match == null) {
-                    val attempts = (pending[finished] ?: 0) + 1
-                    if (attempts >= MAX_METADATA_ATTEMPTS) {
-                        println("Giving up on match ${finished.matchId} for ${finished.accountId} after $attempts attempts.")
-                        pending.remove(finished)
-                    } else {
-                        pending[finished] = attempts
-                    }
+                if (match == null) {
+                    val wait = deferPendingMetadata(finished, pending, retries)
+                    println("Waiting for metadata for match ${finished.matchId}; next attempt in ${wait / 1000}s.")
                     continue
                 }
+                retries.forget(finished)
 
                 try {
                     deliverPendingMatch(

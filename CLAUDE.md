@@ -86,3 +86,13 @@ persisting last_match_id, and retains failed sends for retry. A crash or DB erro
 after send can duplicate delivery. Cancellation propagates through scheduler,
 match sources and API client. SchedulerTest covers delivery ordering and failures.
 GC reconnect readiness and late-response correlation remain follow-up work.
+
+GC history now preserves basic match summaries rather than discarding everything
+except IDs. CachedMatchTable stores shared match information/metadata once;
+CachedPlayerMatchTable stores each account's stats with a composite key. Retain
+25 player rows per account and delete shared rows only when no account references
+them. Recent commands use GC summaries, with metadata fallback only for incomplete
+rows. The scheduler can send a basic summary during API outages. Metadata requests
+share completed-match cache entries and a Retry-After cooldown, while unavailable
+basic data is retained with bounded backoff. scripts/update.py selects a published
+main SHA and updates IMAGE_TAG automatically, with startup checks and rollback.

@@ -1,6 +1,8 @@
 package bot
 
 import api.DeadlockClient
+import api.gc.MatchHistoryProvider
+import kotlinx.coroutines.CancellationException
 import dev.kord.core.Kord
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
@@ -28,14 +30,14 @@ suspend fun registerCommands(kord: Kord) {
 
 }
 
-suspend fun handleCommands(kord: Kord) {
+suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null) {
     kord.on<ChatInputCommandInteractionCreateEvent> {
         val interaction = interaction
         when (interaction.command.rootName) {
             "signup" -> handleSignup(interaction)
             "unsubscribe" -> handleUnsubscribe(interaction)
-            "recentmatch" -> handleRecentMatch(interaction, kord)
-            "lastfive" -> handleLastFive(interaction, kord)
+            "recentmatch" -> handleRecentMatch(interaction, kord, gcProvider)
+            "lastfive" -> handleLastFive(interaction, kord, gcProvider)
         }
     }
 }
@@ -93,20 +95,36 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction) {
     }
 }
 
-private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, kord: Kord) {
-    val accountId = interaction.command.strings["account_id"]!!
-    val channelId = interaction.channelId
-    val discordUser = interaction.user.globalName
+private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, kord: Kord, gc: MatchHistoryProvider?) {
+    val response = interaction.deferEphemeralResponse()
+    val accountId = AccountId.normalize(interaction.command.strings["account_id"]!!)
+    if (accountId == null) {
+        response.respond { content = "Please enter a valid account ID, SteamID64, or Steam profile URL." }
+        return
+    }
     val client = DeadlockClient()
-    val recentMatch = client.getRecentMatch(accountId)[0]
-    val additionalMatchInfo = client.getMatchByMatchID(recentMatch.matchId)
-    client.close()
-    val channel = kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(
-        channelId
-    )
-    MatchMessageGenerator.generateRecentMatch(recentMatch, discordUser, channel, additionalMatchInfo)
-    interaction.deferEphemeralResponse().respond {
-        content = "✅ Fetched recent match for: `$accountId`."
+    try {
+        val result = RecentMatchLookup(gc, client::getRecentMatch, client::getMatchByMatchID).lookup(accountId, 1)
+        val match = result.matches.firstOrNull()
+        if (match == null) {
+            response.respond {
+                content = result.latestId?.let {
+                    "Your latest match is `$it`, but its details aren't available yet. Please try again later."
+                } ?: "No recent matches were found for this account."
+            }
+            return
+        }
+        val info = result.metadata[match.matchId] ?: client.getMatchByMatchID(match.matchId)
+        val channel = requireNotNull(kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(interaction.channelId))
+        MatchMessageGenerator.generateRecentMatch(match, interaction.user.globalName, channel, info)
+        response.respond { content = "✅ Fetched match `${match.matchId}` for `$accountId`." }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        println("Recent match command failed: ${e.message}")
+        response.respond { content = "I couldn't retrieve your latest match right now. Please try again later." }
+    } finally {
+        client.close()
     }
 }
 
@@ -118,27 +136,35 @@ private suspend fun handleUnsubscribe(interaction: ChatInputCommandInteraction) 
     }
 }
 
-private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kord: Kord) {
+private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kord: Kord, gc: MatchHistoryProvider?) {
+    val response = interaction.deferEphemeralResponse()
     val discordId = interaction.user.id.toString()
     val user = UserRepository.selectUserByDiscordID(discordId)
     if (user == null) {
-        interaction.deferEphemeralResponse().respond {
+        response.respond {
             content = "User not registered, please register"
         }
         return
     }
 
     val client = DeadlockClient()
-    val channelIdSnowflake = Snowflake(user.channelId.toString())
-    val channel = kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(
-        channelIdSnowflake
-    )
-    val recentMatch = client.getRecentMatch(user.accountId)
-    client.close()
-
-    MatchMessageGenerator.generateLastFive(recentMatch, user.discordUser, channel)
-
-    interaction.deferEphemeralResponse().respond {
-        content = "✅ Fetching last five matches."
+    try {
+        val result = RecentMatchLookup(gc, client::getRecentMatch, client::getMatchByMatchID).lookup(user.accountId, 5)
+        val waiting = result.unavailableIds.takeIf { it.isNotEmpty() }?.joinToString { "`$it`" }
+        val notice = waiting?.let { "Waiting for match details: $it. Some recent matches are not shown yet." }
+        if (result.matches.isEmpty()) {
+            response.respond { content = notice ?: "No recent matches were found for this account." }
+            return
+        }
+        val channel = requireNotNull(kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(Snowflake(user.channelId.toString())))
+        MatchMessageGenerator.generateLastFive(result.matches, user.discordUser, channel, notice)
+        response.respond { content = notice ?: "✅ Fetched your recent matches." }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        println("Last five command failed: ${e.message}")
+        response.respond { content = "I couldn't retrieve your recent matches right now. Please try again later." }
+    } finally {
+        client.close()
     }
 }
