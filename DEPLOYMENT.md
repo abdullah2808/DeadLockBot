@@ -226,7 +226,14 @@ shared metadata document. Other registered participants get history references
 to that same match, without a second metadata download. Accounts explicitly
 queried through GC history also retain their latest 25 summaries.
 
-If both metadata sources are unavailable, basic GC notifications still work.
+Automatic notifications wait 60 seconds after discovering an unposted match,
+then request metadata and post the enriched summary when available. This grace
+period gives Valve time to publish the file. The scheduler wakes at the deadline
+without waiting for its next 90-second source poll; party members wait together.
+On-demand `/recentmatch` and `/lastfive` remain immediate. A restart starts a fresh
+grace period for the newest unposted match.
+
+If both metadata sources are still unavailable after the grace period, basic GC notifications still work.
 Enrichment retries continue in the background with a delay capped at 15 minutes,
 while the account is registered and the match remains in its retained history.
 At most two background retries run per polling cycle. Existing Discord posts
@@ -297,8 +304,9 @@ coordinate that separately rather than deleting the volume.
   in logs and compare its damage stats with the game. Query a registered party
   member's match and confirm the cached document is reused, including after restart.
 - Use /signup in an accessible Discord text channel; finish a real match and
-  confirm the correct notification and persisted last_match_id. Polling is 90s
-  plus metadata availability. Remove send permission, finish another match,
+  confirm the correct notification and persisted last_match_id. Polling is 90s,
+  followed by a 60s grace period and metadata retrieval. Confirm the discovery
+  log appears about a minute before posting. Remove send permission, finish another match,
   then restore permission and confirm retry sends it without premature persistence.
 - Restart app and verify the same match is not reposted normally; restart the
   stack and confirm database registrations and Steam token survive.
