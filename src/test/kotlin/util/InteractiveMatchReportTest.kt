@@ -12,6 +12,7 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertEquals
 
 class InteractiveMatchReportTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -52,6 +53,38 @@ class InteractiveMatchReportTest {
         val html = render(Players(42, heroId = 13))
         assertTrue(html.contains("Older bot versions did not retain them"))
         assertTrue(html.contains("Unavailable"))
+    }
+
+    @Test
+    fun `render all twelve heroes with six on each team and no account labels`() {
+        val players = List(12) { i -> Players(accountId = 123456 + i, heroId = i + 1, team = i / 6,
+            playerSlot = i, name = "Unwanted player name $i") }
+        val heroes = players.associate { it.heroId to HeroInfo("Hero Name ${it.heroId}", null) }
+        val html = InteractiveMatchReport.render(MatchDTO(MatchInfoDTO(players = players)), 123,
+            ScoreboardAssets(heroes = heroes)).toString(Charsets.UTF_8)
+        assertEquals(12, Regex("data-player=\"\\d+\"").findAll(html).count())
+        assertEquals(2, Regex("6 HEROES").findAll(html).count())
+        assertFalse(html.contains("Account "))
+        assertFalse(html.contains("Unwanted player name"))
+        assertFalse(html.contains("123456"))
+        assertTrue(html.contains("<option value=\"11\">Hero Name 12</option>"))
+        assertTrue(html.contains("<h3>Hero Name 12</h3>"))
+    }
+
+    @Test
+    fun `Soul Ledger information adds categories costs upgrade components and live scaling`() {
+        val item = ItemInfo(30, "Test Upgrade", "upgrade", className = "upgrade_test", itemSlotType = "tech",
+            itemTier = 2, cost = 1600, isActiveItem = true, componentItems = listOf("upgrade_base"),
+            properties = json.parseToJsonElement("""{"damage":{"label":"Damage","value":"22","scale_function":{"specific_stat_scale_type":"ETechPower","stat_scale":0.6}},"disabled":{"label":"Disabled bonus","value":"10","disable_value":"10"}}""").jsonObject,
+            upgrades = json.parseToJsonElement("""[{"property_upgrades":[{"name":"AbilityDuration","bonus":5}]}]""") as kotlinx.serialization.json.JsonArray)
+        val reportAssets = assets.copy(catalog = catalog + mapOf(30L to item, 40L to ItemInfo(40, "Base Item", className = "upgrade_base")))
+        val html = InteractiveMatchReport.render(MatchDTO(MatchInfoDTO(players = listOf(Players(42, items = listOf(MatchItem(30)))))),
+            123, reportAssets).toString(Charsets.UTF_8)
+        assertTrue(html.contains("Spirit · Tier 2 · 1,600 souls · Active"))
+        assertTrue(html.contains("Upgrades from: Base Item"))
+        assertTrue(html.contains("Damage: 22 + 0.6 × Spirit Power"))
+        assertTrue(html.contains("Duration: +5.0s"))
+        assertFalse(html.contains("Disabled bonus"))
     }
 
     @Test

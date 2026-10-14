@@ -22,6 +22,10 @@ Automatic notifications include result colors, hero thumbnails, K/D/A, souls per
 
 ## Run and verify
 
+The HTML report uses hero names only and renders every participant supplied by metadata. Team banners show their actual hero counts and soul totals; there is no four-player cap. The original preview used an eight-player match. Standard 12-player matches show six heroes on each team.
+
+The design keeps Deadlock's dark, brass-and-cream styling and amber/sapphire team banners. Item category colors, upgrade-component information, disabled-property filtering and ability-scaling/upgrade-effect formatting are adapted from [Soul Ledger](https://github.com/abdullah2808/Soul-Ledger). Prices and effects use the live asset catalog; simulator investment totals are not presented as observed match stats.
+
 Startup replaces this application's complete global command list with the six commands above, automatically removing obsolete global commands. Commands registered specifically to an individual server have a separate list and need separate cleanup; commands belonging to other Discord applications are unaffected.
 
 Startup also clears this application's legacy server-specific commands in server `875604309180559383`. It checks the server command list first and skips the overwrite once the list is empty. The six global commands remain available; other servers and applications are unaffected. A cleanup access error is logged and retried on the next startup without preventing the bot from running.

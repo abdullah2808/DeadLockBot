@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
 import java.net.URI
 
 @Serializable
@@ -15,7 +16,13 @@ data class ItemInfo(
     val image: String? = null,
     @SerialName("class_name") val className: String? = null,
     val description: JsonObject? = null,
-    val properties: JsonObject? = null
+    val properties: JsonObject? = null,
+    @SerialName("item_slot_type") val itemSlotType: String? = null,
+    @SerialName("item_tier") val itemTier: Int? = null,
+    val cost: Int? = null,
+    @SerialName("is_active_item") val isActiveItem: Boolean? = null,
+    @SerialName("component_items") val componentItems: List<String>? = null,
+    val upgrades: JsonArray? = null
 )
 
 object ItemRepository {
