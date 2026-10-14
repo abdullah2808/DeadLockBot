@@ -3,6 +3,7 @@
 .gradle
 build
 .env
+.coolify-managed
 .env.*
 !.env.example
 state

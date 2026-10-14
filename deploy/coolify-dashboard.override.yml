@@ -1,0 +1,26 @@
+# Fresh manual installation, Coolify 4.4+ layout (realtime inside coolify).
+# Compose >=2.24.4 is required for !override. Inspect upstream files first.
+# Copy as /data/coolify/source/docker-compose.custom.yml BEFORE first startup.
+services:
+  coolify:
+    ports: !override
+      - "${TAILSCALE_IPV4:?Set this in Coolify source .env}:8000:8080"
+      - "${TAILSCALE_IPV4:?Set this in Coolify source .env}:6001:6001"
+      - "${TAILSCALE_IPV4:?Set this in Coolify source .env}:6002:6002"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  postgres:
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  redis:
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
