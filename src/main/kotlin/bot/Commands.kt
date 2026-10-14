@@ -25,6 +25,7 @@ import io.ktor.client.request.forms.ChannelProvider
 import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.toList
 
 suspend fun registerCommands(kord: Kord) {
     // Replace the complete global list in one request, removing obsolete commands.
@@ -41,6 +42,22 @@ suspend fun registerCommands(kord: Kord) {
         input("match", "Show a full Deadlock match scoreboard") {
             string("match_id", "Match ID (leave blank for your latest tracked match)")
         }
+    }
+
+    // Legacy commands in this server shadow the application's global commands.
+    // Check first so subsequent starts do not repeatedly overwrite an empty list.
+    val legacyGuild = Snowflake("875604309180559383")
+    try {
+        val legacyCommands = kord.getGuildApplicationCommands(legacyGuild).toList()
+        if (legacyCommands.isNotEmpty()) {
+            kord.createGuildApplicationCommands(legacyGuild) {}
+            println("Removed ${legacyCommands.size} legacy server commands from guild $legacyGuild.")
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        // A missing guild or access failure should not stop the bot's global commands.
+        println("Legacy command cleanup for guild $legacyGuild failed; will retry on next startup: ${e.message}")
     }
 }
 
