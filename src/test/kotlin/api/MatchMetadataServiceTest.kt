@@ -10,6 +10,26 @@ import java.io.IOException
 import kotlin.test.*
 
 class MatchMetadataServiceTest {
+    @Test fun `shared GC cooldown preserves API fallback and cached reports across accounts and matches`() = runTest {
+        var now = 0L
+        var sends = 0
+        var apiCalls = 0
+        val gate = GcRequestGate { now }
+        val service = MatchMetadataService(gc { _, id ->
+            gate.request(1, { it: Int -> it }) { sends++; if (now == 0L) 5 else 1 }
+            GcMetadataDownload(id, 1, 2)
+        }, download = { match(it.matchId) }, fallback = { apiCalls++; if (it == 99L) match(it) else null }, clock = { now })
+        assertEquals(match(), service.metadataFor("1", 99))
+        assertEquals(match(), service.metadataFor("2", 99))
+        assertNull(service.metadataFor("2", 100))
+        assertEquals(1, sends)
+        assertEquals(2, apiCalls)
+        now = 60_000
+        service.retryPending(setOf("2"))
+        assertEquals(match(100), service.metadataFor("2", 100))
+        assertEquals(2, sends)
+        assertEquals(2, apiCalls)
+    }
     @Test fun `temporary persistence failure leaves enrichment pending`() = runTest {
         var now = 0L
         var saves = 0

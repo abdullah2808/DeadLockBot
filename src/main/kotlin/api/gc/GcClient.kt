@@ -30,8 +30,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import models.MatchHistoryDTO
 import java.io.File
@@ -82,7 +80,7 @@ class GcClient(
     private val steamFriends = requireNotNull(steamClient.getHandler(SteamFriends::class.java))
     private val gameCoordinator = requireNotNull(steamClient.getHandler(SteamGameCoordinator::class.java))
     private val router = GcResponseRouter()
-    private val requestMutex = Mutex()
+    private val requestGate = GcRequestGate()
     private val friendPolicy = SteamFriendPolicy(enabled = autoAcceptFriends, accept = { account ->
         steamFriends.addFriend(SteamID(76561197960265728L + account.toLong()))
         println("Steam bot: accepting incoming friend request from $account.")
@@ -171,7 +169,14 @@ class GcClient(
         return GcMetadataDownload(matchId, body.replayGroupId.toUInt().toLong(), body.metadataSalt.toUInt().toLong())
     }
 
-    private suspend fun request(responseType: Int, send: (JobID) -> Unit): Message = requestMutex.withLock {
+    private suspend fun request(responseType: Int, send: (JobID) -> Unit): Message = requestGate.request<Message>(
+        responseType,
+        result = { response -> when (response) {
+            is CitadelMatchHistory.CMsgClientToGCGetMatchHistoryResponse -> response.result.number
+            is CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse -> response.result.number
+            else -> error("Unexpected GC response: ${response.javaClass.simpleName}")
+        } },
+    ) {
         var answer: CompletableDeferred<Message>? = null
         try {
             withTimeout(REQUEST_TIMEOUT_MS) { welcome.await() }
