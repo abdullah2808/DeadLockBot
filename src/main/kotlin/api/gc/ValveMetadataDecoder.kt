@@ -46,7 +46,9 @@ internal fun decodeValveMetadata(bytes: ByteArray, matchId: Long, maxDecodedByte
             abandonedTimeSeconds = player.abandonMatchTimeS.takeIf { player.hasAbandonMatchTimeS() },
             playerSlot = player.playerSlot,
             items = player.itemsList.map { item -> MatchItem(item.itemId.toUInt().toLong(), item.gameTimeS,
-                item.soldTimeS.takeIf { item.hasSoldTimeS() }) },
+                item.soldTimeS.takeIf { item.hasSoldTimeS() },
+                item.upgradeId.toUInt().toLong().takeIf { item.hasUpgradeId() },
+                item.upgradeInfo.toUInt().toLong().takeIf { item.hasUpgradeInfo() }) },
             stats = last?.let { listOf(Stats(
                 it.playerDamage.takeIf { _ -> it.hasPlayerDamage() },
                 it.bossDamage.takeIf { _ -> it.hasBossDamage() },

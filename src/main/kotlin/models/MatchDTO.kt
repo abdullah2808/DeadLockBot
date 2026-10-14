@@ -43,7 +43,9 @@ data class Players (
 data class MatchItem(
     @SerialName("item_id") val itemId: Long,
     @SerialName("game_time_s") val gameTimeSeconds: Int = 0,
-    @SerialName("sold_time_s") val soldTimeSeconds: Int? = null
+    @SerialName("sold_time_s") val soldTimeSeconds: Int? = null,
+    @SerialName("upgrade_id") val upgradeId: Long? = null,
+    @SerialName("upgrade_info") val upgradeInfo: Long? = null
 )
 
 

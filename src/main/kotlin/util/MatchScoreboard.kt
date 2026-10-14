@@ -3,6 +3,7 @@ package util
 import models.HeroInfo
 import models.MatchDTO
 import models.Players
+import models.ItemInfo
 import java.awt.Color
 import java.awt.Font
 import java.awt.GradientPaint
@@ -18,7 +19,8 @@ data class ScoreboardAssets(
     val heroes: Map<Int, HeroInfo> = emptyMap(),
     val portraits: Map<Int, BufferedImage> = emptyMap(),
     val items: Map<Long, BufferedImage> = emptyMap(),
-    val shopItemIds: Set<Long>? = null
+    val shopItemIds: Set<Long>? = null,
+    val catalog: Map<Long, ItemInfo> = emptyMap()
 )
 
 /** Pure Java2D renderer: works in headless deployments without a browser or image service. */

@@ -21,6 +21,7 @@ import dev.kord.rest.builder.interaction.string
 import util.MatchMessageGenerator
 import util.MatchScoreboard
 import util.ScoreboardAssetLoader
+import util.InteractiveMatchReport
 import io.ktor.client.request.forms.ChannelProvider
 import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.Dispatchers
@@ -244,13 +245,15 @@ private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kor
     }
 }
 
+internal fun parseMatchId(value: String): Long? = value.trim().removePrefix("match_id:").trim().toLongOrNull()?.takeIf { it > 0 }
+
 private suspend fun handleMatch(interaction: ChatInputCommandInteraction, gc: MatchHistoryProvider?, metadata: MatchMetadataService?) {
     // Acknowledge before API calls and image rendering to keep the interaction alive.
     val response = interaction.deferPublicResponse()
     val rawMatchId = interaction.command.strings["match_id"]
-    val requestedId = rawMatchId?.trim()?.toLongOrNull()?.takeIf { it > 0 }
+    val requestedId = rawMatchId?.let(::parseMatchId)
     if (rawMatchId != null && requestedId == null) {
-        response.respond { content = "Please enter a positive numeric match ID, e.g. `/match match_id:12345678`." }
+        response.respond { content = "Please enter a positive numeric match ID, e.g. `/match 12345678`." }
         return
     }
     val user = UserRepository.selectUserByDiscordID(interaction.user.id.toString())
@@ -277,9 +280,12 @@ private suspend fun handleMatch(interaction: ChatInputCommandInteraction, gc: Ma
         val assets = ScoreboardAssetLoader.load(match)
         val highlighted = user?.accountId?.toLongOrNull()?.toInt()
         val png = withContext(Dispatchers.Default) { MatchScoreboard.render(match, matchId, assets, highlighted) }
+        val html = withContext(Dispatchers.Default) { InteractiveMatchReport.render(match, matchId, assets, highlighted) }
         response.respond {
-            content = "**Deadlock • Match $matchId**\nFull team scoreboard · K/D/A · souls · damage · healing · final items"
+            content = "**Deadlock • Match $matchId**\nFull team scoreboard · K/D/A · souls · damage · healing · final items\n" +
+                "Download the `.html` report and open it in a browser for hero/item hover details and build timelines."
             addFile("deadlock-match-$matchId.png", ChannelProvider(png.size.toLong()) { ByteReadChannel(png) })
+            addFile("deadlock-match-$matchId.html", ChannelProvider(html.size.toLong()) { ByteReadChannel(html) })
         }
     } catch (e: GcHistoryPermissionException) {
         response.respond {

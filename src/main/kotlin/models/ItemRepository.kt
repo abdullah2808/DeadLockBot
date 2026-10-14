@@ -3,6 +3,7 @@ package models
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.net.URI
 
 @Serializable
@@ -11,7 +12,10 @@ data class ItemInfo(
     val name: String,
     val type: String? = null,
     @SerialName("shop_image") val shopImage: String? = null,
-    val image: String? = null
+    val image: String? = null,
+    @SerialName("class_name") val className: String? = null,
+    val description: JsonObject? = null,
+    val properties: JsonObject? = null
 )
 
 object ItemRepository {

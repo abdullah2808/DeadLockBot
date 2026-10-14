@@ -4,13 +4,17 @@ A Kotlin Discord bot that tracks Deadlock matches and posts match recaps.
 
 ## Match commands
 
-- `/match match_id:103328445` posts a full match scoreboard image in the current channel.
+- `/match 103328445` posts a full match scoreboard image in the current channel. Select `/match` and paste the numeric ID into its `match_id` option if your client does not accept the copied command directly.
 - `/match` shows the latest match for your account linked through `/signup`.
 - `/recentmatch account_id:<id>` posts a player recap. Account IDs, SteamID64s, and numeric Steam profile URLs are accepted.
 - `/lastfive` posts the latest five matches for your linked account.
 - `/unsubscribe` stops automatic tracking.
 
 The scoreboard groups all players by team and displays heroes, K/D/A, souls, player damage, objective damage, healing, team soul totals, and final shop items. The latest recorded stats snapshot supplies damage and healing. Sold items and hero ability upgrades are excluded from the inventory. Longer inventories wrap onto a second row. Your row is outlined when viewing your latest linked match.
+
+`/match` also attaches a standalone `.html` report. Download it and open it in a browser to hover/focus heroes for ability descriptions, hover/focus/tap items for descriptions and properties, select a player, and filter/scrub their purchase, sale and ability-event timeline. Images and scripts are embedded; no hosting or internet connection is needed to view the file. The PNG in Discord remains a static preview.
+
+Progression preserves recorded event order and times, including sold items. Ability events show which ability was upgraded and when, retaining raw upgrade IDs without guessing tier numbers. Events sharing a timestamp keep their original metadata order. Descriptions come from the current asset catalog, so historical patch values may differ. Older cached matches may lack progression or upgrade details; the report states when data is unavailable.
 
 Player names are used if metadata supplies them; otherwise the scoreboard displays account IDs. Missing damage/healing stats display `—`. Hero and item images use the public Deadlock assets API, with cached images and fallbacks during outages. If full match metadata is unavailable or still processing, the command explains this instead of producing an incomplete scoreboard. Metadata cached by older bot versions may lack inventory; those rows show `Unavailable` for items.
 
