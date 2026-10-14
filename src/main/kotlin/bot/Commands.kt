@@ -27,24 +27,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 suspend fun registerCommands(kord: Kord) {
-    kord.createGlobalChatInputCommand("signup", "Track your Deadlock matches") {
-        string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
+    // Replace the complete global list in one request, removing obsolete commands.
+    kord.createGlobalApplicationCommands {
+        input("signup", "Track your Deadlock matches") {
+            string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
+        }
+        input("unsubscribe", "Stop tracking your matches")
+        input("steambot", "Add the Steam bot and check your friend status")
+        input("recentmatch", "Get Your Most Recent Match") {
+            string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
+        }
+        input("lastfive", "Get Your Last Five Matches")
+        input("match", "Show a full Deadlock match scoreboard") {
+            string("match_id", "Match ID (leave blank for your latest tracked match)")
+        }
     }
-
-    kord.createGlobalChatInputCommand("unsubscribe", "Stop tracking your matches")
-    kord.createGlobalChatInputCommand("steambot", "Add the Steam bot and check your friend status")
-
-    kord.createGlobalChatInputCommand("recentmatch", "Get Your Most Recent Match") {
-        string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
-    }
-
-    kord.createGlobalChatInputCommand("lastfive", "Get Your Last Five Matches") {
-    }
-
-    kord.createGlobalChatInputCommand("match", "Show a full Deadlock match scoreboard") {
-        string("match_id", "Match ID (leave blank for your latest tracked match)")
-    }
-
 }
 
 suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null, metadata: MatchMetadataService? = null,
