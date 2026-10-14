@@ -18,6 +18,8 @@ Automatic notifications include result colors, hero thumbnails, K/D/A, souls per
 
 ## Run and verify
 
+Startup replaces this application's complete global command list with the six commands above, automatically removing obsolete global commands. Commands registered specifically to an individual server have a separate list and need separate cleanup; commands belonging to other Discord applications are unaffected.
+
 Use JDK 21. Configure the existing environment variables required by `Env` and the database, then run `./gradlew run` (`.\gradlew.bat run` on Windows). Restarting the bot registers `/match`. The bot needs **Send Messages**, **Embed Links**, and **Attach Files** permissions in the posting channel.
 
 The scoreboard uses the existing shared metadata service: Steam GC/Valve metadata when available, then the public API fallback. `/match` without an ID uses the existing recent-match lookup for the linked account. Signup, `/steambot`, the notification grace period, metadata retries and Steam player-name lookup remain in place. Valve decoding now retains item events as well as final stats.
