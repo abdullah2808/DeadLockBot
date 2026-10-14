@@ -32,12 +32,20 @@ data class Players (
     @SerialName("player_slot") val playerSlot: Int = 0,
     val items: List<MatchItem>? = null,
     val name: String? = null,
+    @SerialName("death_details") val deathDetails: List<MatchDeath>? = null,
 ) {
     val finalStats: Stats? get() = stats.asReversed().maxByOrNull { it.timeStampSeconds }
     val finalItems: List<MatchItem> get() = items.orEmpty()
         .filter { it.soldTimeSeconds == null || it.soldTimeSeconds == 0 }
         .filter { it.itemId > 0 }.sortedBy { it.gameTimeSeconds }
 }
+
+@Serializable
+data class MatchDeath(
+    @SerialName("game_time_s") val gameTimeSeconds: Int? = null,
+    @SerialName("killer_player_slot") val killerPlayerSlot: Int? = null,
+    @SerialName("death_duration_s") val deathDurationSeconds: Int? = null
+)
 
 @Serializable
 data class MatchItem(

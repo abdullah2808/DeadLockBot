@@ -7,6 +7,7 @@ import models.ItemInfo
 import models.MatchDTO
 import models.MatchInfoDTO
 import models.MatchItem
+import models.MatchDeath
 import models.Players
 import java.io.File
 import kotlin.test.Test
@@ -85,6 +86,35 @@ class InteractiveMatchReportTest {
         assertTrue(html.contains("Damage: 22 + 0.6 × Spirit Power"))
         assertTrue(html.contains("Duration: +5.0s"))
         assertFalse(html.contains("Disabled bonus"))
+    }
+
+    @Test
+    fun `kills and deaths map attacker slots and share the build timeline`() {
+        val victim = Players(42, heroId = 13, playerSlot = 1, deathDetails = listOf(MatchDeath(60, 0, 12)), items = listOf(MatchItem(10, 30)))
+        val killer = Players(43, heroId = 1, playerSlot = 0, deathDetails = emptyList(), items = emptyList())
+        val match = MatchDTO(MatchInfoDTO(players = listOf(victim, killer)))
+        val reportAssets = assets.copy(heroes = assets.heroes + (1 to HeroInfo("Infernus", null)))
+        val html = InteractiveMatchReport.render(match, 123, reportAssets).toString(Charsets.UTF_8)
+        assertTrue(html.contains("Killed by Infernus"))
+        assertTrue(html.contains("Killed Haze"))
+        assertTrue(html.contains("Recorded death duration: 12s"))
+        assertTrue(html.indexOf("Bought Extended Magazine") < html.indexOf("Killed by Infernus"))
+        assertTrue(html.contains("data-time=\"60\" data-kind=\"death\""))
+        assertTrue(html.contains("data-time=\"60\" data-kind=\"kill\""))
+        assertTrue(html.contains("Kills &amp; deaths"))
+    }
+
+    @Test
+    fun `ambiguous missing and self inflicted attackers do not invent kills`() {
+        val victim = Players(42, heroId = 13, playerSlot = 0,
+            deathDetails = listOf(MatchDeath(10, 0), MatchDeath(null, 9)))
+        val duplicate = Players(43, heroId = 1, playerSlot = 0, deathDetails = emptyList())
+        val ambiguous = InteractiveMatchReport.render(MatchDTO(MatchInfoDTO(players = listOf(victim, duplicate))), 123, assets).toString(Charsets.UTF_8)
+        assertTrue(ambiguous.contains("Died · attacker unavailable"))
+        assertFalse(ambiguous.contains("data-kind=\"kill\""))
+        val self = render(victim.copy(deathDetails = listOf(MatchDeath(10, 0))))
+        assertTrue(self.contains("Died · self-inflicted"))
+        assertFalse(self.contains("data-kind=\"kill\""))
     }
 
     @Test
