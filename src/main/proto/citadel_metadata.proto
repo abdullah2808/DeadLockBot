@@ -14,7 +14,9 @@ message CMsgMatchMetaDataContents {
     message Items {
         optional uint32 game_time_s = 1;
         optional uint32 item_id = 2;
+        optional uint32 upgrade_id = 3;
         optional uint32 sold_time_s = 4;
+        optional uint32 upgrade_info = 7;
     }
     message PlayerStats {
         optional uint32 time_stamp_s = 1;

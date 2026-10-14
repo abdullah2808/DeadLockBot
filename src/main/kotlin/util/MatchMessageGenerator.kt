@@ -143,7 +143,7 @@ object MatchMessageGenerator {
             }
             field {
                 name = "📋 Full match"
-                value = "`/match match_id:${match.matchId}`\nSee both teams, heroes and final stats."
+                value = "`/match ${match.matchId}`\nSee both teams, heroes and final stats."
                 inline = false
             }
             hero.minimapImage?.let { imageUrl -> thumbnail { url = imageUrl } }
@@ -190,7 +190,7 @@ object MatchMessageGenerator {
                     name = "${result(match)} • ${heroLookup(match.heroId).name}"
                     value = "**${match.kills} / ${match.deaths} / ${match.assists}** K/D/A • " +
                         "💰 **${number(match.netWorth)}** souls • 🕒 ${duration(match)}\n" +
-                        "<t:${match.startTime}:R> • `/match match_id:${match.matchId}`"
+                        "<t:${match.startTime}:R> • `/match ${match.matchId}`"
                     inline = false
                 }
             }

@@ -24,11 +24,12 @@ object ScoreboardAssetLoader {
 
     suspend fun load(match: MatchDTO): ScoreboardAssets = withContext(Dispatchers.IO) {
         val heroIds = match.matchInfo.players.map { it.heroId }.distinct()
-        val heroes = heroIds.associateWith { HeroInfo(HeroRepository.getHeroName(it), HeroRepository.getHeroMinimapImage(it)) }
+        val heroes = heroIds.associateWith { HeroRepository.getHeroInfo(it) }
         val items = ItemRepository.getItems()
         val shopItemIds = items.values.filter { it.type == "upgrade" }.map { it.id }.toSet().takeIf { it.isNotEmpty() }
-        val itemIds = match.matchInfo.players.flatMap { it.finalItems.filter { item -> shopItemIds?.contains(item.itemId) == true }.take(24) }
-            .map { it.itemId }.distinct()
+        val abilityClasses = heroes.values.flatMap { it.abilities }.toSet()
+        val itemIds = (match.matchInfo.players.flatMap { it.items.orEmpty() }.map { it.itemId } +
+            items.values.filter { it.className in abilityClasses }.map { it.id }).distinct()
         coroutineScope {
             val portraits = heroIds.map { id -> async { id to loadImage(heroes[id]?.minimapImage) } }
             val icons = itemIds.map { id -> async { id to loadImage(items[id]?.let { it.shopImage ?: it.image }) } }
@@ -36,7 +37,8 @@ object ScoreboardAssetLoader {
                 heroes,
                 portraits.awaitAll().mapNotNull { (id, image) -> image?.let { id to it } }.toMap(),
                 icons.awaitAll().mapNotNull { (id, image) -> image?.let { id to it } }.toMap(),
-                shopItemIds
+                shopItemIds,
+                items
             )
         }
     }
