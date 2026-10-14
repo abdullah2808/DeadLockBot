@@ -8,6 +8,7 @@ import models.MatchInfoDTO
 import models.Players
 import models.Stats
 import models.MatchItem
+import models.MatchDeath
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.io.ByteArrayInputStream
 import java.io.IOException
@@ -45,6 +46,11 @@ internal fun decodeValveMetadata(bytes: ByteArray, matchId: Long, maxDecodedByte
             heroLevel = player.level,
             abandonedTimeSeconds = player.abandonMatchTimeS.takeIf { player.hasAbandonMatchTimeS() },
             playerSlot = player.playerSlot,
+            deathDetails = player.deathDetailsList.map { death -> MatchDeath(
+                death.gameTimeS.takeIf { death.hasGameTimeS() },
+                death.killerPlayerSlot.takeIf { death.hasKillerPlayerSlot() },
+                death.deathDurationS.takeIf { death.hasDeathDurationS() }
+            ) },
             items = player.itemsList.map { item -> MatchItem(item.itemId.toUInt().toLong(), item.gameTimeS,
                 item.soldTimeS.takeIf { item.hasSoldTimeS() },
                 item.upgradeId.toUInt().toLong().takeIf { item.hasUpgradeId() },

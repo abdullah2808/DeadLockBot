@@ -22,6 +22,8 @@ Automatic notifications include result colors, hero thumbnails, K/D/A, souls per
 
 ## Run and verify
 
+The Dossier timeline also includes recorded kills and deaths. Select **Kills & deaths**, **Kills only**, or **Deaths only** in the event filter. Victim death records identify attackers by player slot, so kills show the victim's hero and deaths show the attacker's hero when identifiable. Unknown/ambiguous attackers remain labelled unavailable, and self-inflicted deaths do not create kill events. Older cached metadata may lack combat records; the report labels incomplete coverage instead of inventing timestamps from final K/D/A totals.
+
 The HTML report uses hero names only and renders every participant supplied by metadata. Team banners show their actual hero counts and soul totals; there is no four-player cap. The original preview used an eight-player match. Standard 12-player matches show six heroes on each team.
 
 The design keeps Deadlock's dark, brass-and-cream styling and amber/sapphire team banners. Item category colors, upgrade-component information, disabled-property filtering and ability-scaling/upgrade-effect formatting are adapted from [Soul Ledger](https://github.com/abdullah2808/Soul-Ledger). Prices and effects use the live asset catalog; simulator investment totals are not presented as observed match stats.
