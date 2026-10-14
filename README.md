@@ -36,6 +36,8 @@ Use JDK 21. Configure the existing environment variables required by `Env` and t
 
 The scoreboard uses the existing shared metadata service: Steam GC/Valve metadata when available, then the public API fallback. `/match` without an ID uses the existing recent-match lookup for the linked account. Signup, `/steambot`, the notification grace period, metadata retries and Steam player-name lookup remain in place. Valve decoding now retains item events as well as final stats.
 
+When Valve responds with `k_eResult_RateLimited`, the Steam session pauses both history and metadata queries across all accounts and matches. The cooldown starts at one minute and doubles on repeated throttling, up to 15 minutes. Cached data and the public API fallback remain available. A successful retry of the throttled endpoint resets the backoff; restarting the bot is not required. This reduces repeated requests but cannot change Valve's quota.
+
 For the NAS, merge the reviewed PR and wait for the main container image to publish, then run:
 
 ```sh
