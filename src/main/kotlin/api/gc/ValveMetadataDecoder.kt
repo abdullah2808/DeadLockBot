@@ -7,6 +7,7 @@ import models.MatchDTO
 import models.MatchInfoDTO
 import models.Players
 import models.Stats
+import models.MatchItem
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.io.ByteArrayInputStream
 import java.io.IOException
@@ -34,7 +35,7 @@ internal fun decodeValveMetadata(bytes: ByteArray, matchId: Long, maxDecodedByte
     }
     require(info.matchOutcome != 1) { "Valve metadata describes an invalid match" }
     val players = info.playersList.filter { it.hasAccountId() && it.accountId != 0 && it.heroId > 0 }.map { player ->
-        val last = player.statsList.maxByOrNull { it.timeStampS }
+        val last = player.statsList.asReversed().maxByOrNull { it.timeStampS }
         Players(
             accountId = player.accountId, team = player.team, heroId = player.heroId,
             kills = if (player.hasKills()) player.kills else last?.kills ?: 0,
@@ -43,7 +44,16 @@ internal fun decodeValveMetadata(bytes: ByteArray, matchId: Long, maxDecodedByte
             netWorth = player.netWorth, lastHits = player.lastHits, denies = player.denies,
             heroLevel = player.level,
             abandonedTimeSeconds = player.abandonMatchTimeS.takeIf { player.hasAbandonMatchTimeS() },
-            stats = last?.let { listOf(Stats(it.playerDamage, it.bossDamage, it.playerHealing, it.damageAbsorbed)) }
+            playerSlot = player.playerSlot,
+            items = player.itemsList.map { item -> MatchItem(item.itemId.toUInt().toLong(), item.gameTimeS,
+                item.soldTimeS.takeIf { item.hasSoldTimeS() }) },
+            stats = last?.let { listOf(Stats(
+                it.playerDamage.takeIf { _ -> it.hasPlayerDamage() },
+                it.bossDamage.takeIf { _ -> it.hasBossDamage() },
+                it.playerHealing.takeIf { _ -> it.hasPlayerHealing() },
+                it.damageAbsorbed.takeIf { _ -> it.hasDamageAbsorbed() },
+                timeStampSeconds = it.timeStampS
+            )) }
                 ?: emptyList(),
         )
     }
@@ -54,5 +64,6 @@ internal fun decodeValveMetadata(bytes: ByteArray, matchId: Long, maxDecodedByte
         players = players, gameMode = info.gameMode, matchMode = info.matchMode,
         objectivesMaskTeam0 = info.objectivesMaskTeam0, objectivesMaskTeam1 = info.objectivesMaskTeam1,
         averageBadgeTeam0 = info.averageBadgeTeam0, averageBadgeTeam1 = info.averageBadgeTeam1,
+        matchOutcome = info.matchOutcome,
     ))
 }

@@ -11,6 +11,11 @@ message CMsgMatchMetaData {
 }
 
 message CMsgMatchMetaDataContents {
+    message Items {
+        optional uint32 game_time_s = 1;
+        optional uint32 item_id = 2;
+        optional uint32 sold_time_s = 4;
+    }
     message PlayerStats {
         optional uint32 time_stamp_s = 1;
         optional uint32 kills = 14;
@@ -23,6 +28,8 @@ message CMsgMatchMetaDataContents {
     }
     message Players {
         optional uint32 account_id = 1;
+        optional uint32 player_slot = 2;
+        repeated Items items = 4;
         repeated PlayerStats stats = 5;
         optional int32 team = 6 [default = 0];
         optional uint32 kills = 8;

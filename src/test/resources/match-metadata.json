@@ -1,0 +1,90 @@
+{
+  "match_info": {
+    "match_id": 103328445,
+    "duration_s": 765,
+    "winning_team": 1,
+    "match_outcome": 0,
+    "players": [
+      {
+        "account_id": 158394412,
+        "team": 1,
+        "hero_id": 13,
+        "kills": 5,
+        "deaths": 3,
+        "assists": 13,
+        "net_worth": 48000,
+        "level": 35,
+        "player_slot": 7,
+        "stats": [
+          {
+            "time_stamp_s": 765,
+            "player_damage": 25575,
+            "boss_damage": 1193,
+            "player_healing": 10751,
+            "damage_absorbed": 598
+          }
+        ],
+        "items": [
+          {
+            "game_time_s": 509,
+            "item_id": 1080948381,
+            "upgrade_id": 1026445305,
+            "sold_time_s": 0,
+            "flags": 0,
+            "imbued_ability_id": 0,
+            "upgrade_info": 983041
+          },
+          {
+            "game_time_s": 509,
+            "item_id": 2414191464,
+            "upgrade_id": 801266914,
+            "sold_time_s": 0,
+            "flags": 0,
+            "imbued_ability_id": 0,
+            "upgrade_info": 983041
+          }
+        ]
+      },
+      {
+        "account_id": 166655728,
+        "team": 0,
+        "hero_id": 79,
+        "kills": 3,
+        "deaths": 4,
+        "assists": 8,
+        "net_worth": 48000,
+        "level": 35,
+        "player_slot": 3,
+        "stats": [
+          {
+            "time_stamp_s": 765,
+            "player_damage": 13202,
+            "boss_damage": 837,
+            "player_healing": 17419,
+            "damage_absorbed": 3867
+          }
+        ],
+        "items": [
+          {
+            "game_time_s": 512,
+            "item_id": 1568845221,
+            "upgrade_id": 49937874,
+            "sold_time_s": 0,
+            "flags": 0,
+            "imbued_ability_id": 0,
+            "upgrade_info": 983041
+          },
+          {
+            "game_time_s": 512,
+            "item_id": 536278136,
+            "upgrade_id": 1458519903,
+            "sold_time_s": 0,
+            "flags": 0,
+            "imbued_ability_id": 0,
+            "upgrade_info": 983041
+          }
+        ]
+      }
+    ]
+  }
+}
