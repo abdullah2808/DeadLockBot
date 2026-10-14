@@ -80,4 +80,3 @@ class MatchMessageGeneratorTest {
         assertTrue(waiting.description!!.startsWith("Waiting for match details: 999."))
     }
 }
-
