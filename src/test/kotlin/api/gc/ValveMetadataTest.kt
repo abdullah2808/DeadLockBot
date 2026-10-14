@@ -20,6 +20,9 @@ class ValveMetadataTest {
             .setPlayerDamage(42000).setBossDamage(3000).setPlayerHealing(400).setDamageAbsorbed(600)
         val player = Contents.Players.newBuilder().setAccountId(-1).setHeroId(88).setTeam(1)
             .setDeaths(4).setAssists(12).setNetWorth(35000).setLevel(25)
+            .setPlayerSlot(7)
+            .addItems(Contents.Items.newBuilder().setItemId(-1).setGameTimeS(300).setSoldTimeS(0))
+            .addItems(Contents.Items.newBuilder().setItemId(123).setGameTimeS(100).setSoldTimeS(200))
             .addStats(last).addStats(Contents.PlayerStats.newBuilder().setTimeStampS(10).setPlayerDamage(5))
         val info = Contents.MatchInfo.newBuilder().setMatchId(id).setStartTime(1700000000)
             .setDurationS(1800).setWinningTeam(1).setMatchOutcome(outcome).setNotScored(!scored)
@@ -39,6 +42,9 @@ class ValveMetadataTest {
             assertEquals(42000, player.stats.single().playerDamage)
             assertEquals(3000, player.stats.single().objectiveDamage)
             assertEquals(7, player.kills)
+            assertEquals(7, player.playerSlot)
+            assertEquals(4294967295L, player.finalItems.single().itemId)
+            assertEquals(1000, player.finalStats?.timeStampSeconds)
             assertEquals(91, decoded.matchInfo.averageBadgeTeam1)
             val summary = assertNotNull(decoded.toMatchHistory("4294967295"))
             assertEquals(25, summary.heroLevel)
@@ -57,6 +63,7 @@ class ValveMetadataTest {
     @Test fun `draw and unscored games have neutral result`() {
         assertEquals(-1, decodeValveMetadata(fixture(scored = false), 99).matchInfo.winningTeam)
         assertEquals(-1, decodeValveMetadata(fixture(outcome = 2), 99).matchInfo.winningTeam)
+        assertEquals(2, decodeValveMetadata(fixture(outcome = 2), 99).matchInfo.matchOutcome)
     }
     @Test fun `decoded size limit also applies to compressed data`() {
         assertFailsWith<IOException> { decodeValveMetadata(Zstd.compress(fixture()), 99, 10) }

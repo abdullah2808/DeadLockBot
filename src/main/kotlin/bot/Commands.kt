@@ -19,6 +19,12 @@ import dev.kord.common.entity.Snowflake
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.rest.builder.interaction.string
 import util.MatchMessageGenerator
+import util.MatchScoreboard
+import util.ScoreboardAssetLoader
+import io.ktor.client.request.forms.ChannelProvider
+import io.ktor.utils.io.ByteReadChannel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 suspend fun registerCommands(kord: Kord) {
     kord.createGlobalChatInputCommand("signup", "Track your Deadlock matches") {
@@ -33,6 +39,10 @@ suspend fun registerCommands(kord: Kord) {
     }
 
     kord.createGlobalChatInputCommand("lastfive", "Get Your Last Five Matches") {
+    }
+
+    kord.createGlobalChatInputCommand("match", "Show a full Deadlock match scoreboard") {
+        string("match_id", "Match ID (leave blank for your latest tracked match)")
     }
 
 }
@@ -54,6 +64,7 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
             "unsubscribe" -> handleUnsubscribe(interaction)
             "recentmatch" -> handleRecentMatch(interaction, kord, gcProvider, metadata, playerNames)
             "lastfive" -> handleLastFive(interaction, kord, gcProvider, metadata)
+            "match" -> handleMatch(interaction, gcProvider, metadata)
         }
     }
 }
@@ -214,6 +225,58 @@ private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kor
     } catch (e: Exception) {
         println("Last five command failed: ${e.message}")
         response.respond { content = "I couldn't retrieve your recent matches right now. Please try again later." }
+    } finally {
+        client.close()
+    }
+}
+
+private suspend fun handleMatch(interaction: ChatInputCommandInteraction, gc: MatchHistoryProvider?, metadata: MatchMetadataService?) {
+    // Acknowledge before API calls and image rendering to keep the interaction alive.
+    val response = interaction.deferPublicResponse()
+    val rawMatchId = interaction.command.strings["match_id"]
+    val requestedId = rawMatchId?.trim()?.toLongOrNull()?.takeIf { it > 0 }
+    if (rawMatchId != null && requestedId == null) {
+        response.respond { content = "Please enter a positive numeric match ID, e.g. `/match match_id:12345678`." }
+        return
+    }
+    val user = UserRepository.selectUserByDiscordID(interaction.user.id.toString())
+    if (requestedId == null && user == null) {
+        response.respond { content = "Use `/signup` to link your account, or provide a `match_id` to view any match." }
+        return
+    }
+    val client = DeadlockClient()
+    try {
+        val fetchMetadata: suspend (Long) -> models.MatchDTO? = { id ->
+            if (metadata != null && user != null) metadata.metadataFor(user.accountId, id) else client.getMatchByMatchID(id)
+        }
+        val recent = if (requestedId == null) RecentMatchLookup(gc, client::getRecentMatch, fetchMetadata).lookup(user!!.accountId, 1) else null
+        val matchId = requestedId ?: recent?.latestId ?: recent?.matches?.firstOrNull()?.matchId
+        if (matchId == null) {
+            response.respond { content = "No recent matches found for your linked account." }
+            return
+        }
+        val match = recent?.metadata?.get(matchId) ?: fetchMetadata(matchId)
+        if (match == null || match.matchInfo.players.isEmpty()) {
+            response.respond { content = "Full metadata for match `$matchId` is unavailable. It may still be processing; try again later." }
+            return
+        }
+        val assets = ScoreboardAssetLoader.load(match)
+        val highlighted = user?.accountId?.toLongOrNull()?.toInt()
+        val png = withContext(Dispatchers.Default) { MatchScoreboard.render(match, matchId, assets, highlighted) }
+        response.respond {
+            content = "**Deadlock • Match $matchId**\nFull team scoreboard · K/D/A · souls · damage · healing · final items"
+            addFile("deadlock-match-$matchId.png", ChannelProvider(png.size.toLong()) { ByteReadChannel(png) })
+        }
+    } catch (e: GcHistoryPermissionException) {
+        response.respond {
+            content = "Deadlock GC denied match access for your linked account.\n\n${steamOnboarding(gc, user?.accountId)}"
+            steamBotButton(gc)
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        println("Full match command failed: ${e.message}")
+        response.respond { content = "I couldn't generate this scoreboard right now. Please try again shortly." }
     } finally {
         client.close()
     }

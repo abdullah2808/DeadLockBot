@@ -18,5 +18,7 @@ RUN --mount=type=secret,id=proxy_ca \
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/build/libs/*-all.jar app.jar
-CMD ["java", "-jar", "app.jar"]
+CMD ["java", "-Djava.awt.headless=true", "-jar", "app.jar"]

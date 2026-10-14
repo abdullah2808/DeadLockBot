@@ -6,10 +6,11 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class Stats (
-    @SerialName("player_damage") val playerDamage: Int,
-    @SerialName("boss_damage") val objectiveDamage: Int,
-    @SerialName("player_healing") val playerHealing: Int,
-    @SerialName("damage_absorbed") val damageAbsorbed: Int
+    @SerialName("player_damage") val playerDamage: Int? = null,
+    @SerialName("boss_damage") val objectiveDamage: Int? = null,
+    @SerialName("player_healing") val playerHealing: Int? = null,
+    @SerialName("damage_absorbed") val damageAbsorbed: Int? = null,
+    @SerialName("time_stamp_s") val timeStampSeconds: Int = 0
 )
 
 @Serializable
@@ -28,6 +29,21 @@ data class Players (
     @SerialName("denies") val denies: Int = 0,
     @SerialName("level") val heroLevel: Int = 0,
     @SerialName("abandon_match_time_s") val abandonedTimeSeconds: Int? = null,
+    @SerialName("player_slot") val playerSlot: Int = 0,
+    val items: List<MatchItem>? = null,
+    val name: String? = null,
+) {
+    val finalStats: Stats? get() = stats.asReversed().maxByOrNull { it.timeStampSeconds }
+    val finalItems: List<MatchItem> get() = items.orEmpty()
+        .filter { it.soldTimeSeconds == null || it.soldTimeSeconds == 0 }
+        .filter { it.itemId > 0 }.sortedBy { it.gameTimeSeconds }
+}
+
+@Serializable
+data class MatchItem(
+    @SerialName("item_id") val itemId: Long,
+    @SerialName("game_time_s") val gameTimeSeconds: Int = 0,
+    @SerialName("sold_time_s") val soldTimeSeconds: Int? = null
 )
 
 
@@ -44,7 +60,8 @@ data class MatchInfoDTO(
     @SerialName("match_mode") val matchMode: Int = 0,
     @SerialName("objectives_mask_team0") val objectivesMaskTeam0: Long = 0,
     @SerialName("objectives_mask_team1") val objectivesMaskTeam1: Long = 0,
-    @SerialName(value = "players") val players: List<Players>
+    @SerialName(value = "players") val players: List<Players> = emptyList(),
+    @SerialName("match_outcome") val matchOutcome: Int? = null,
 )
 
 
