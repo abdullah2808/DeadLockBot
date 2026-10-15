@@ -27,12 +27,13 @@ class InteractiveMatchReportTest {
     @Test
     fun `report retains purchases sales and ability events in time order`() {
         val player = Players(42, heroId = 13, items = listOf(
-            MatchItem(20, 120, upgradeId = 123), MatchItem(10, 30, soldTimeSeconds = 90), MatchItem(20, 150, upgradeId = 456)
+            MatchItem(20, 120, upgradeId = 0), MatchItem(10, 30, soldTimeSeconds = 90), MatchItem(20, 150, upgradeId = 456)
         ))
         val html = render(player)
         assertTrue(html.indexOf("Bought Extended Magazine") < html.indexOf("Sold Extended Magazine"))
-        assertTrue(html.indexOf("Sold Extended Magazine") < html.indexOf("Ability point · Fixation"))
-        assertTrue(html.contains("Recorded ability upgrade · exact tier not inferred"))
+        assertTrue(html.indexOf("Sold Extended Magazine") < html.indexOf("Unlocked Fixation · Tier 0"))
+        assertTrue(html.contains("Upgraded Fixation · Tier 1"))
+        assertTrue(html.contains("1 AP · tier inferred from recorded progression"))
         assertTrue(html.contains("data-time=\"150\" data-kind=\"ability\""))
         assertTrue(html.contains("1. Fixation"))
         assertTrue(html.contains("More ammo."))

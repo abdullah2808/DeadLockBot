@@ -13,7 +13,9 @@ import kotlinx.coroutines.CancellationException
 import dev.kord.rest.builder.component.actionRow
 import dev.kord.core.Kord
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
+import dev.kord.core.entity.interaction.ActionInteraction
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
+import dev.kord.core.event.interaction.ComponentInteractionCreateEvent
 import dev.kord.core.on
 import data.UserRepository
 import dev.kord.common.entity.Snowflake
@@ -23,6 +25,7 @@ import util.MatchMessageGenerator
 import util.MatchScoreboard
 import util.ScoreboardAssetLoader
 import util.InteractiveMatchReport
+import util.matchReportId
 import io.ktor.client.request.forms.ChannelProvider
 import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +69,15 @@ suspend fun registerCommands(kord: Kord) {
 suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null, metadata: MatchMetadataService? = null,
                            playerNames: PlayerNameService = PlayerNameService()) {
     registerMatchExplorer(kord)
+    kord.on<ComponentInteractionCreateEvent> {
+        if (!interaction.componentId.startsWith("match-report:")) return@on
+        val matchId = matchReportId(interaction.componentId)
+        if (matchId == null) {
+            interaction.deferEphemeralResponse().respond { content = "This match button is invalid. Use `/match` to open a report." }
+        } else {
+            handleMatch(interaction, gcProvider, metadata, matchId.toString(), privateResponse = true)
+        }
+    }
     kord.on<ChatInputCommandInteractionCreateEvent> {
         val interaction = interaction
         when (interaction.command.rootName) {
@@ -81,7 +93,7 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
             "unsubscribe" -> handleUnsubscribe(interaction)
             "recentmatch" -> handleRecentMatch(interaction, kord, gcProvider, metadata, playerNames)
             "lastfive" -> handleLastFive(interaction, kord, gcProvider, metadata)
-            "match" -> handleMatch(interaction, gcProvider, metadata)
+            "match" -> handleMatch(interaction, gcProvider, metadata, interaction.command.strings["match_id"])
         }
     }
 }
@@ -249,13 +261,13 @@ private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kor
 
 internal fun parseMatchId(value: String): Long? = value.trim().removePrefix("match_id:").trim().toLongOrNull()?.takeIf { it > 0 }
 
-private suspend fun handleMatch(interaction: ChatInputCommandInteraction, gc: MatchHistoryProvider?, metadata: MatchMetadataService?) {
+private suspend fun handleMatch(interaction: ActionInteraction, gc: MatchHistoryProvider?, metadata: MatchMetadataService?,
+                                rawMatchId: String?, privateResponse: Boolean = false) {
     // Acknowledge before API calls and image rendering to keep the interaction alive.
-    val response = interaction.deferPublicResponse()
-    val rawMatchId = interaction.command.strings["match_id"]
+    val response = if (privateResponse) interaction.deferEphemeralResponse() else interaction.deferPublicResponse()
     val requestedId = rawMatchId?.let(::parseMatchId)
     if (rawMatchId != null && requestedId == null) {
-        response.respond { content = "Please enter a positive numeric match ID, e.g. `/match 12345678`." }
+        response.respond { content = "Choose `/match`, select the `match_id` option (Tab on desktop), then paste a positive match ID such as `12345678`." }
         return
     }
     val user = UserRepository.selectUserByDiscordID(interaction.user.id.toString())

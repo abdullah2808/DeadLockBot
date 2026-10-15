@@ -143,7 +143,7 @@ object MatchMessageGenerator {
             }
             field {
                 name = "📋 Full match"
-                value = "`/match ${match.matchId}`\nSee both teams, heroes and final stats."
+                value = "Use **Open full match** below for both teams, heroes and final stats.\nMatch ID: `${match.matchId}`"
                 inline = false
             }
             hero.minimapImage?.let { imageUrl -> thumbnail { url = imageUrl } }
@@ -163,6 +163,7 @@ object MatchMessageGenerator {
     ) {
         channel?.createMessage {
             embeds = mutableListOf(buildRecentMatchEmbed(match, userName, additionalMatchInfo))
+            matchReportButtons(listOf(match.matchId))
         }
     }
 
@@ -190,11 +191,11 @@ object MatchMessageGenerator {
                     name = "${result(match)} • ${heroLookup(match.heroId).name}"
                     value = "**${match.kills} / ${match.deaths} / ${match.assists}** K/D/A • " +
                         "💰 **${number(match.netWorth)}** souls • 🕒 ${duration(match)}\n" +
-                        "<t:${match.startTime}:R> • `/match ${match.matchId}`"
+                        "<t:${match.startTime}:R> • Match ID: `${match.matchId}`"
                     inline = false
                 }
             }
-            footer { text = "Deadlock • Use /match to open a full scoreboard" }
+            footer { text = "Deadlock • Select a match button below to open its full report" }
         }
     }
 
@@ -206,6 +207,7 @@ object MatchMessageGenerator {
     ) {
         channel?.createMessage {
             embeds = mutableListOf(buildLastFiveEmbed(matches, userName, notice = notice))
+            matchReportButtons(matches.take(5).map { it.matchId })
         }
     }
 }
