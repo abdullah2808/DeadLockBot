@@ -82,7 +82,7 @@ class MatchMetadataServiceTest {
         durationSeconds = 1800, winningTeam = 1, players = listOf(Players(1, heroId = 88), Players(2, heroId = 85))))
     private fun gc(friends: Set<String> = emptySet(), fetch: suspend (String?, Long) -> GcMetadataDownload?) = object : MatchHistoryProvider {
         override suspend fun recentMatchIds(accountId: String) = emptyList<Long>()
-        override suspend fun metadataDownload(targetAccountId: String?, matchId: Long) = fetch(targetAccountId, matchId)
+        override suspend fun metadataDownload(targetAccountId: String?, matchId: Long, tracked: Boolean) = fetch(targetAccountId, matchId)
         override fun friendship(accountId: String) = if (accountId in friends) SteamFriendship.FRIEND else SteamFriendship.NONE
     }
     @Test fun `simultaneous party lookups download and save a match only once`() = runTest {
@@ -108,7 +108,7 @@ class MatchMetadataServiceTest {
         val queried = mutableListOf<String?>()
         val service = MatchMetadataService(gc { account, id ->
             queried += account
-            if (account == "1") throw IOException("invalid permission")
+            if (account == "1") throw GcMetadataException(id, GcMetadataFailure.DENIED, "k_eResult_InvalidPermission")
             GcMetadataDownload(id, 1, 2)
         }, download = { match() }, fallback = { null }, clock = { 0L })
         assertNull(service.metadataFor("1", 99))
@@ -217,7 +217,7 @@ class MatchMetadataServiceTest {
         now = 60 * 60_000L
         service.retryPending(setOf("1"))
         assertEquals(1, queries)
-        assertEquals(1, steamCalls)
+        assertEquals(0, steamCalls)
     }
 
     @Test fun `unpublished Valve files report processing and retry without another Steam query`() = runTest {
@@ -230,11 +230,11 @@ class MatchMetadataServiceTest {
         val waiting = unavailable(service.lookup("1", 99, interactive = true))
         assertEquals(MetadataUnavailableReason.PROCESSING, waiting.reason)
         assertTrue(waiting.retrying)
-        assertEquals(30_000L, waiting.retryInMillis)
+        assertEquals(15_000L, waiting.retryInMillis)
         published = true
         assertEquals(match(), service.metadataFor("1", 99, interactive = true))
         assertEquals(1, queries)
-        assertEquals(1, steamCalls)
+        assertEquals(0, steamCalls)
     }
 
     @Test fun `GC in-flight answers are reported as processing`() = runTest {
@@ -243,12 +243,64 @@ class MatchMetadataServiceTest {
         assertEquals(MetadataUnavailableReason.PROCESSING, unavailable(service.lookup("1", 99, interactive = true)).reason)
     }
 
-    @Test fun `deadlock-api Steam lookups run before spending this bot's GC budget`() = runTest {
-        var queries = 0
-        val service = MatchMetadataService(gc { _, id -> queries++; GcMetadataDownload(id, 1, 2) },
-            download = { match() }, fallback = { null }, steamFallback = { match(it) })
+    @Test fun `the bot's own GC goes first and deadlock-api's Steam lookup covers a deferred GC`() = runTest {
+        var steamCalls = 0
+        var deferred = false
+        val service = MatchMetadataService(gc { _, id -> if (deferred) throw GcRequestDeferredException(20_000); GcMetadataDownload(id, 1, 2) },
+            download = { match(it.matchId) }, fallback = { null }, steamFallback = { steamCalls++; match(it) })
         assertEquals(match(), service.metadataFor("1", 99))
-        assertEquals(0, queries)
+        assertEquals(0, steamCalls)
+        deferred = true
+        assertEquals(match(100), service.metadataFor("1", 100))
+        assertEquals(1, steamCalls)
+    }
+
+    @Test fun `Valve is not re-asked about an unfinished match until its spacing elapses`() = runTest {
+        var now = 0L
+        var queries = 0
+        var steamCalls = 0
+        val service = MatchMetadataService(gc { _, id ->
+            queries++
+            if (now < 60_000) throw GcMetadataException(id, GcMetadataFailure.IN_FLIGHT, "k_eResult_MatchInFlight")
+            GcMetadataDownload(id, 1, 2)
+        }, download = { match() }, fallback = { null }, steamFallback = { steamCalls++; null }, clock = { now })
+        assertEquals(MetadataUnavailableReason.PROCESSING, unavailable(service.lookup("1", 99, interactive = true)).reason)
+        now = 30_000
+        val waiting = unavailable(service.lookup("1", 99, interactive = true))
+        assertEquals(MetadataUnavailableReason.PROCESSING, waiting.reason)
+        assertEquals(30_000L, waiting.retryInMillis)
+        assertEquals(1, queries)
+        now = 60_000
+        assertEquals(match(), service.metadataFor("1", 99, interactive = true))
+        assertEquals(2, queries)
+        assertEquals(0, steamCalls)
+    }
+
+    @Test fun `a registered viewer of an untracked match is not assumed to have played it`() = runTest {
+        val targets = mutableListOf<String?>()
+        val trackedFlags = mutableListOf<Boolean>()
+        val provider = object : MatchHistoryProvider {
+            override suspend fun recentMatchIds(accountId: String) = emptyList<Long>()
+            override suspend fun metadataDownload(targetAccountId: String?, matchId: Long, tracked: Boolean): GcMetadataDownload {
+                targets += targetAccountId
+                trackedFlags += tracked
+                return GcMetadataDownload(matchId, 1, 2)
+            }
+        }
+        val service = MatchMetadataService(provider, download = { match() }, fallback = { null })
+        assertEquals(match(), service.metadataFor("9", 99, interactive = true, viewer = true))
+        // Untargeted, and only from the budget's unreserved share.
+        assertEquals(listOf<String?>(null), targets)
+        assertEquals(listOf(false), trackedFlags)
+    }
+
+    @Test fun `the scheduler learns when the next background retry is due`() = runTest {
+        var now = 0L
+        val service = MatchMetadataService(gc { _, _ -> null }, download = { match() }, fallback = { null }, clock = { now })
+        assertNull(service.nextRetryInMillis())
+        assertNull(service.metadataFor("1", 99))
+        now = 5_000
+        assertEquals(10_000L, service.nextRetryInMillis())
     }
 
     @Test fun `paced Steam sources report the earliest next lookup`() = runTest {

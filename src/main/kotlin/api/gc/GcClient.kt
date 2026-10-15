@@ -43,8 +43,11 @@ interface MatchHistoryProvider {
     suspend fun recentMatchIds(accountId: String): List<Long>
     suspend fun recentHistory(accountId: String): MatchHistorySnapshot = MatchHistorySnapshot(recentMatchIds(accountId), emptyList())
     suspend fun cachedMatch(accountId: String, matchId: Long): MatchHistoryDTO? = null
-    /** [targetAccountId] names a participant whose privacy grants access; null sends an untargeted query. */
-    suspend fun metadataDownload(targetAccountId: String?, matchId: Long): GcMetadataDownload? = null
+    /**
+     * [targetAccountId] names a participant whose privacy grants access; null sends an untargeted query.
+     * [tracked] lookups (a registered player's match) may use the budget's reserved share.
+     */
+    suspend fun metadataDownload(targetAccountId: String?, matchId: Long, tracked: Boolean = true): GcMetadataDownload? = null
     fun steamBotIdentity(): SteamBotIdentity? = null
     fun steamPlayerName(accountId: String): String? = null
     fun friendship(accountId: String): SteamFriendship = SteamFriendship.UNKNOWN
@@ -69,7 +72,7 @@ class GcClient(
     private val initialRefreshToken: String?,
     private val tokenFile: File = File("steam_refresh_token.txt"),
     private val autoAcceptFriends: Boolean = true,
-    private val metadataIntervalMillis: Long = 30 * 60_000L,
+    private val metadataBudget: GcMetadataBudget = GcMetadataBudget(),
 ) : MatchHistoryProvider {
     private companion object {
         const val DEADLOCK_APP_ID = 1422450
@@ -87,9 +90,7 @@ class GcClient(
     private val steamFriends = requireNotNull(steamClient.getHandler(SteamFriends::class.java))
     private val gameCoordinator = requireNotNull(steamClient.getHandler(SteamGameCoordinator::class.java))
     private val router = GcResponseRouter()
-    private val requestGate = GcRequestGate(mapOf(MSG_METADATA_RESPONSE to metadataIntervalMillis.also {
-        require(it >= 0) { "GC metadata interval must be nonnegative" }
-    }))
+    private val requestGate = GcRequestGate(mapOf(MSG_METADATA_RESPONSE to metadataBudget))
     private val friendPolicy = SteamFriendPolicy(enabled = autoAcceptFriends, accept = { account ->
         steamFriends.addFriend(SteamID(76561197960265728L + account.toLong()))
         println("Steam bot: accepting incoming friend request from $account.")
@@ -162,8 +163,8 @@ class GcClient(
         return MatchHistorySnapshot(body.matchesList.map { it.matchId }, summaries)
     }
 
-    override suspend fun metadataDownload(targetAccountId: String?, matchId: Long): GcMetadataDownload? {
-        val body = request(MSG_METADATA_RESPONSE) { job ->
+    override suspend fun metadataDownload(targetAccountId: String?, matchId: Long, tracked: Boolean): GcMetadataDownload? {
+        val body = request(MSG_METADATA_RESPONSE, tracked) { job ->
             val message = ClientGCMsgProtobuf<CitadelMatchHistory.CMsgClientToGCGetMatchMetaData.Builder>(
                 CitadelMatchHistory.CMsgClientToGCGetMatchMetaData::class.java, MSG_GET_METADATA)
             message.sourceJobID = job
@@ -171,11 +172,15 @@ class GcClient(
             targetAccountId?.let { message.body.targetAccountId = it.toLong().toInt() }
             gameCoordinator.send(message, DEADLOCK_APP_ID)
         } as CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse
+        // Request mode and result are logged so targeted and untargeted access can be compared.
+        println("GC metadata query for match $matchId (${if (targetAccountId == null) "untargeted" else "targeted"}): " +
+            "${body.result}; ${metadataBudget.remaining(tracked)} queries left in the rolling day.")
         return metadataReference(matchId, body)
     }
 
-    private suspend fun request(responseType: Int, send: (JobID) -> Unit): Message = requestGate.request<Message>(
+    private suspend fun request(responseType: Int, tracked: Boolean = true, send: (JobID) -> Unit): Message = requestGate.request<Message>(
         responseType,
+        tracked = tracked,
         result = { response -> when (response) {
             is CitadelMatchHistory.CMsgClientToGCGetMatchHistoryResponse -> response.result.number
             is CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse -> response.result.number

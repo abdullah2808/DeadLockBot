@@ -307,7 +307,7 @@ private suspend fun handleMatch(interaction: ActionInteraction, gc: MatchHistory
     try {
         // Unregistered viewers (e.g. clicking another player's notification) still reach tracked participants' GC access.
         val fetchMetadata: suspend (Long) -> MetadataLookup = { id ->
-            metadata?.lookup(user?.accountId, id, interactive = true)
+            metadata?.lookup(user?.accountId, id, interactive = true, viewer = requestedId != null)
                 ?: client.getMatchByMatchID(id)?.let { MetadataLookup.Found(it) }
                 ?: MetadataLookup.Unavailable(MetadataUnavailableReason.NOT_STORED)
         }

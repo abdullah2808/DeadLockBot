@@ -189,9 +189,9 @@ cached by match ID. /recentmatch and /lastfive use GC history when configured,
 and identify missing details instead of presenting stale API history as current.
 Basic notifications can be delivered without external metadata; damage/healing
 and team rank are optional enhancements. Detailed metadata comes from stored
-public API data when available, then deadlock-api's Steam-backed lookup, then
-the bot's paced GC query, whose file is downloaded from Valve's replay server
-and decoded locally. HTTP 429 honors Retry-After, with separate cooldowns for
+public API data when available, then the bot's budgeted GC query, whose file is
+downloaded from Valve's replay server and decoded locally, then deadlock-api's
+Steam-backed lookup when the GC cannot be asked or cannot answer. HTTP 429 honors Retry-After, with separate cooldowns for
 stored and Steam-backed lookups. Set `DEADLOCK_API_KEY` in `.env` to raise the
 Steam-backed quota from 3 to 300 lookups per hour; set
 `DEADLOCK_API_STEAM_FALLBACK=false` to use only stored data and the bot's GC. Missing basic data remains pending with retry delays capped at
@@ -236,18 +236,27 @@ shared metadata document. Other registered participants get history references
 to that same match, without a second metadata download. Accounts explicitly
 queried through GC history also retain their latest 25 summaries.
 
-Automatic notifications wait 60 seconds after discovering an unposted match,
-then request metadata and post the enriched summary when available. This grace
-period gives Valve time to publish the file. The scheduler wakes at the deadline
-without waiting for its next 90-second source poll; party members wait together.
-On-demand `/recentmatch` and `/lastfive` remain immediate. A restart starts a fresh
-grace period for the newest unposted match.
+Automatic notifications request metadata as soon as an unposted match is
+discovered and post as soon as it arrives. After 60 seconds without it, the
+basic summary is posted instead and edited in place once metadata arrives. The
+scheduler wakes for the deadline and for metadata retries without waiting for
+its next 90-second source poll; party members share one lookup. On-demand
+`/recentmatch` and `/lastfive` remain immediate. A restart starts a fresh
+deadline for the newest unposted match.
+
+Fresh GC metadata queries follow a rolling budget: `STEAM_METADATA_DAILY_LIMIT`
+(default 40) per 24 hours, at least `STEAM_METADATA_INTERVAL_SECONDS` (default
+20) apart. **If your `.env` still sets `STEAM_METADATA_INTERVAL_SECONDS=1800`
+from an older `.env.example`, change it to 20 or remove it**; otherwise queries
+stay 30 minutes apart. Logs show `GC metadata query for match … (targeted|untargeted):
+<result>; N queries left in the rolling day.`
 
 If both metadata sources are still unavailable after the grace period, basic GC notifications still work.
 Enrichment retries continue in the background with a delay capped at 15 minutes,
 while the account is registered and the match remains in its retained history.
-At most two background retries run per polling cycle. Existing Discord posts
-are not edited; `/recentmatch` can show the enriched details once available.
+Notifications posted without metadata are stored in `match_notifications` and
+edited in place when it arrives, for up to 24 hours and across restarts; logs
+show `Added full metadata to the notification for match …`.
 Completed documents are reused across participants, commands, and restarts.
 Only newly detected or explicitly requested matches trigger enrichment; the
 bot does not download all 50 history entries on every poll.
@@ -314,9 +323,10 @@ coordinate that separately rather than deleting the volume.
   in logs and compare its damage stats with the game. Query a registered party
   member's match and confirm the cached document is reused, including after restart.
 - Use /signup in an accessible Discord text channel; finish a real match and
-  confirm the correct notification and persisted last_match_id. Polling is 90s,
-  followed by a 60s grace period and metadata retrieval. Confirm the discovery
-  log appears about a minute before posting. Remove send permission, finish another match,
+  confirm the correct notification and persisted last_match_id. Polling is 90s;
+  metadata retrieval starts at discovery and posting follows within 60s. The
+  `Posted match …` log states whether full metadata was included and how long
+  after discovery; a basic post should later log `Added full metadata …`. Remove send permission, finish another match,
   then restore permission and confirm retry sends it without premature persistence.
 - Restart app and verify the same match is not reposted normally; restart the
   stack and confirm database registrations and Steam token survive.

@@ -3,12 +3,18 @@ package bot
 import api.DeadlockClient
 import api.MatchMetadataService
 import api.gc.MatchHistoryProvider
+import data.MatchNotificationRepository
+import data.PostedNotification
 import data.UserRepository
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
+import dev.kord.core.behavior.MessageBehavior
 import dev.kord.core.entity.channel.TextChannel
+import dev.kord.rest.request.RestRequestException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import models.MatchDTO
+import models.MatchHistoryDTO
 import models.toMatchHistory
 import util.MatchMessageGenerator
 
@@ -37,7 +43,8 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
     // post error), with their attempt counts.
     val pending = mutableMapOf<FinishedMatch, Int>()
     val retries = MetadataRetrySchedule()
-    // Poll every 90 seconds, but wake after a newly discovered match's 60-second grace period.
+    // Poll every 90 seconds. Metadata is fetched from discovery on; a notification posts as soon as it
+    // arrives, or with the basic summary after 60 seconds and is edited once metadata arrives.
     val timing = NotificationTiming()
 
     try {
@@ -53,7 +60,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                             if (usersByAccount[finished.accountId]?.lastMatchId == finished.matchId.toString()) return@forEach
                             if (pending.putIfAbsent(finished, 0) == null) {
                                 timing.discovered(finished)
-                                println("Found match ${finished.matchId} for ${finished.accountId}; waiting 60s for detailed metadata before posting.")
+                                println("Found match ${finished.matchId} for ${finished.accountId}; fetching metadata, posting within 60s.")
                             }
                         }
                     } finally {
@@ -76,9 +83,10 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                         continue
                     }
 
-                    if (!timing.ready(finished) || !retries.ready(finished)) continue
-
-                    val cachedSummary = gcProvider?.cachedMatch(finished.accountId, finished.matchId)
+                    if (!retries.ready(finished)) continue
+                    val deadlinePassed = timing.ready(finished)
+                    // Before the deadline only the metadata service's own (quick) retry schedule applies.
+                    if (metadataService == null && !deadlinePassed) continue
 
                     val metadata = try {
                         if (metadataService != null) metadataService.metadataFor(finished.accountId, finished.matchId)
@@ -89,6 +97,9 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                         println("Metadata fetch error for match ${finished.matchId}: ${e.message}")
                         null
                     }
+                    if (metadata == null && !deadlinePassed) continue
+
+                    val cachedSummary = gcProvider?.cachedMatch(finished.accountId, finished.matchId)
                     val match = cachedSummary ?: metadata?.toMatchHistory(finished.accountId)
 
                     if (match == null) {
@@ -102,11 +113,16 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                         deliverPendingMatch(
                             finished, pending,
                             resolveChannel = { user.channelId?.let { kord.getChannelOf<TextChannel>(Snowflake(it)) } },
-                            send = { channel -> MatchMessageGenerator.generateRecentMatch(match, user.discordUser, channel, metadata) },
+                            send = { channel ->
+                                val message = MatchMessageGenerator.generateRecentMatch(match, user.discordUser, channel, metadata)
+                                if (metadata == null && message != null) awaitMetadata(PostedNotification(finished.accountId,
+                                    finished.matchId, message.channelId.toString(), message.id.toString(), System.currentTimeMillis()))
+                            },
                             persist = { UserRepository.updateLastMatch(finished.accountId, finished.matchId.toString()) },
                         )
+                        println("Posted match ${finished.matchId} for ${finished.accountId} " +
+                            "${if (metadata != null) "with" else "without"} full metadata, ${timing.sinceDiscoveryMillis(finished) / 1000}s after discovery.")
                         timing.forget(finished)
-                        println("Posted match ${finished.matchId} for ${finished.accountId}.")
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -115,6 +131,35 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                     }
                 }
                 metadataService?.retryPending(usersByAccount.keys)
+                if (metadataService != null) enrichPostedNotifications(
+                    awaiting = {
+                        val since = System.currentTimeMillis() - ENRICHMENT_WINDOW_MILLIS
+                        MatchNotificationRepository.prune(since) // older posts are no longer worth editing
+                        MatchNotificationRepository.awaitingMetadata(since)
+                    },
+                    lookup = { metadataService.metadataFor(it.accountId, it.matchId) },
+                    summary = { notification, metadata ->
+                        gcProvider?.cachedMatch(notification.accountId, notification.matchId) ?: metadata.toMatchHistory(notification.accountId)
+                    },
+                    edit = { notification, summary, metadata ->
+                        val user = usersByAccount[notification.accountId] ?: run {
+                            MatchNotificationRepository.remove(notification.accountId, notification.matchId) // unsubscribed
+                            return@enrichPostedNotifications false
+                        }
+                        val message = MessageBehavior(Snowflake(notification.channelId), Snowflake(notification.messageId), kord)
+                        try {
+                            MatchMessageGenerator.updateRecentMatch(message, summary, user.discordUser, metadata)
+                            true
+                        } catch (e: RestRequestException) {
+                            // Deleted messages and lost channel access are permanent; other failures retry next cycle.
+                            if (e.status.code !in setOf(403, 404)) throw e
+                            println("Notification for match ${notification.matchId} can no longer be edited (HTTP ${e.status.code}).")
+                            MatchNotificationRepository.remove(notification.accountId, notification.matchId)
+                            false
+                        }
+                    },
+                    remove = { MatchNotificationRepository.remove(it.accountId, it.matchId) },
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -123,13 +168,56 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                 timing.pollFinished()
             }
 
-            delay(timing.nextWakeDelayMillis())
+            // Wake for the metadata service's quick retries too, not only for source polls and deadlines.
+            val retryIn = metadataService?.nextRetryInMillis()?.coerceAtLeast(MIN_WAKE_MILLIS)
+            delay(minOf(timing.nextWakeDelayMillis(), retryIn ?: Long.MAX_VALUE))
         }
     } finally {
         client.close()
     }
 }
 
+
+private const val ENRICHMENT_WINDOW_MILLIS = 24 * 60 * 60_000L
+private const val MIN_WAKE_MILLIS = 5_000L
+
+/** A failure to remember a notification must never fail (and so duplicate) its delivery. */
+private fun awaitMetadata(notification: PostedNotification) {
+    try { MatchNotificationRepository.add(notification) }
+    catch (e: Exception) { println("Could not queue notification for match ${notification.matchId} for enrichment: ${e.message}") }
+}
+
+/**
+ * Edit notifications that were posted with only the basic summary once full metadata is available.
+ * Lookups follow the metadata service's retry schedule, so calling this every cycle is cheap.
+ */
+internal suspend fun enrichPostedNotifications(
+    awaiting: () -> List<PostedNotification>,
+    lookup: suspend (PostedNotification) -> MatchDTO?,
+    summary: suspend (PostedNotification, MatchDTO) -> MatchHistoryDTO?,
+    edit: suspend (PostedNotification, MatchHistoryDTO, MatchDTO) -> Boolean,
+    remove: (PostedNotification) -> Unit,
+) {
+    val queued = try { awaiting() } catch (e: Exception) {
+        println("Could not load notifications awaiting metadata: ${e.message}")
+        return
+    }
+    for (notification in queued) {
+        try {
+            val metadata = lookup(notification) ?: continue
+            val match = summary(notification, metadata) ?: continue
+            if (edit(notification, match, metadata)) {
+                remove(notification)
+                println("Added full metadata to the notification for match ${notification.matchId} " +
+                    "(${notification.accountId}), ${(System.currentTimeMillis() - notification.postedAt) / 1000}s after posting.")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            println("Could not enrich the notification for match ${notification.matchId}: ${e.message}")
+        }
+    }
+}
 
 /** Keep the match pending unless an accessible channel, send and persistence all succeed. */
 internal suspend fun <C : Any> deliverPendingMatch(

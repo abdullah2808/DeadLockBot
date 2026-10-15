@@ -41,9 +41,10 @@ sealed interface MetadataLookup {
 
 /**
  * One completed document per match. Cheap sources (local cache, stored public API, a known Valve download
- * reference) are tried on every lookup. Scarce Steam lookups follow only on a miss: deadlock-api's own
- * Steam-backed quota first, then this bot's paced GC query. GC queries target a participant, preferring the
- * bot's Steam friends, and a participant Valve denies is not asked again for that match.
+ * reference) are tried on every lookup. Scarce Steam lookups follow only on a miss: this bot's budgeted GC
+ * query first, then deadlock-api's separate Steam-backed quota when the GC cannot be asked or cannot answer.
+ * GC queries target a participant, preferring the bot's Steam friends, and a participant Valve denies is not
+ * asked again for that match.
  */
 class MatchMetadataService(
     private val gc: MatchHistoryProvider?,
@@ -59,6 +60,8 @@ class MatchMetadataService(
     private data class Key(val account: String, val match: Long)
     private data class Retry(val attempts: Int, val due: Long, val outcome: MetadataLookup.Unavailable)
     private class Failure(val reason: MetadataUnavailableReason, val retryInMillis: Long? = null)
+    /** Valve answered without a download reference; space further queries for this match. */
+    private class GcAnswer(val queries: Int, val nextAt: Long, val reason: MetadataUnavailableReason)
 
     private val mutex = Mutex()
     // Read without the mutex so cached reports never wait behind a slow Steam lookup.
@@ -70,30 +73,33 @@ class MatchMetadataService(
     private val references = bounded<Pair<Long, GcMetadataDownload>>()
     private val deniedTargets = bounded<MutableSet<String>>()
     private val invalidMatches = bounded<Unit>()
+    private val gcAnswers = bounded<GcAnswer>()
 
-    suspend fun metadataFor(account: String?, match: Long, interactive: Boolean = false): MatchDTO? =
-        (lookup(account, match, interactive) as? MetadataLookup.Found)?.match
+    suspend fun metadataFor(account: String?, match: Long, interactive: Boolean = false, viewer: Boolean = false): MatchDTO? =
+        (lookup(account, match, interactive, viewer) as? MetadataLookup.Found)?.match
 
     /**
-     * [account] is whoever the lookup is for, if registered. [interactive] lookups (a person is waiting)
-     * skip the background retry delay; the scarce Steam sources still enforce their own pacing.
+     * [account] is whoever the lookup is for, if registered. [viewer] means the account only asked to see the
+     * match and is not known to have played it, so it is never assumed to be a participant. [interactive]
+     * lookups (a person is waiting) skip the background retry delay; scarce Steam sources keep their budgets.
      */
-    suspend fun lookup(account: String?, match: Long, interactive: Boolean = false): MetadataLookup {
+    suspend fun lookup(account: String?, match: Long, interactive: Boolean = false, viewer: Boolean = false): MetadataLookup {
         require(match > 0)
         cached(match)?.let { return MetadataLookup.Found(it) }
         return mutex.withLock {
             cached(match)?.let { return@withLock MetadataLookup.Found(it) }
             val people = participants(match)
+            val player = account?.takeIf { it in people || (people.isEmpty() && !viewer) }
             // Background retries survive only for a participant whose match is retained.
-            val key = (account?.takeIf { people.isEmpty() || it in people } ?: people.firstOrNull() ?: account)
-                ?.let { Key(it, match) }
+            val key = (player ?: people.firstOrNull() ?: account)?.let { Key(it, match) }
             val waiting = key?.let { pending[it] }
             if (!interactive && waiting != null && waiting.due > clock()) return@withLock waiting.outcome
 
             val failures = mutableListOf<Failure>()
             var source = "API"
+            val started = clock()
             val info = withTimeoutOrNull(LOOKUP_TIMEOUT_MILLIS) {
-                fetch(account, people, match, failures) { source = it }
+                fetch(player, people, registered = account != null, match, failures) { source = it }
             }
             if (info == null) {
                 val outcome = summarize(failures)
@@ -110,10 +116,20 @@ class MatchMetadataService(
             remember(info)
             references.remove(match)
             deniedTargets.remove(match)
+            gcAnswers.remove(match)
             pending.keys.removeIf { it.match == match }
-            println("Cached $source metadata for match $match (${info.matchInfo.players.size} players).")
+            println("Cached $source metadata for match $match (${info.matchInfo.players.size} players) in ${clock() - started}ms.")
             MetadataLookup.Found(info)
         }
+    }
+
+    /**
+     * When the earliest background retry is due, so the scheduler can wake for it; null when none is pending.
+     * Never waits behind a lookup in progress: it then asks to be checked again shortly.
+     */
+    fun nextRetryInMillis(): Long? {
+        if (!mutex.tryLock()) return BUSY_RECHECK_MILLIS
+        try { return pending.values.minOfOrNull { it.due }?.minus(clock()) } finally { mutex.unlock() }
     }
 
     /** Continue enrichment after a basic GC summary has already been posted. */
@@ -127,7 +143,7 @@ class MatchMetadataService(
         for (key in due) lookup(key.account, key.match)
     }
 
-    private suspend fun fetch(account: String?, people: List<String>, match: Long,
+    private suspend fun fetch(player: String?, people: List<String>, registered: Boolean, match: Long,
                               failures: MutableList<Failure>, source: (String) -> Unit): MatchDTO? {
         // disable_steam=true: a stored miss costs no Steam quota.
         attempt("Stored API", match, failures) { fallback(match) }?.let { return it }
@@ -139,29 +155,46 @@ class MatchMetadataService(
             source("Valve CDN")
             return attempt("Valve CDN", match, failures) { download(reference) }
         }
-        steamFallback?.let { steam ->
-            source("Steam-backed API")
-            attempt("Steam-backed API", match, failures) { steam(match) }?.let { return it }
-        }
         source("Valve CDN")
-        return freshGc(account, people, match, failures)
+        freshGc(player, people, registered, match, failures)?.let { return it }
+        // Valve already said the match is unpublished or invalid; asking it again through deadlock-api cannot help.
+        if (failures.any { it.reason == MetadataUnavailableReason.PROCESSING || it.reason == MetadataUnavailableReason.INVALID_MATCH })
+            return null
+        return steamFallback?.let { steam ->
+            source("Steam-backed API")
+            attempt("Steam-backed API", match, failures) { steam(match) }
+        }
     }
 
-    private suspend fun freshGc(account: String?, people: List<String>, match: Long, failures: MutableList<Failure>): MatchDTO? {
+    private suspend fun freshGc(player: String?, people: List<String>, registered: Boolean, match: Long,
+                                failures: MutableList<Failure>): MatchDTO? {
         val gc = gc ?: return null
+        // Re-asking Valve every few seconds while it is still processing would only spend the daily budget.
+        gcAnswers[match]?.let { answer ->
+            val wait = if (answer.queries >= GC_QUERY_SPACING.size) null else answer.nextAt - clock()
+            if (wait == null || wait > 0) return null.also { failures += Failure(answer.reason, wait) }
+        }
         val refused = deniedTargets[match].orEmpty()
-        val targets = gcTargets(gc, account, people).filter { it !in refused }
+        val targets = gcTargets(gc, player, people, registered).filter { it !in refused }
         val target = targets.firstOrNull()
             ?: return null.also { if (refused.isNotEmpty()) failures += Failure(MetadataUnavailableReason.ACCESS_DENIED) }
         val reference = try {
-            gc.metadataDownload(target.ifEmpty { null }, match)
+            gc.metadataDownload(target.ifEmpty { null }, match, tracked = people.isNotEmpty() || player != null)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             println("GC metadata unavailable for match $match: ${e.message}")
-            failures += gcFailure(e, match, target, alternatives = targets.size > 1)
+            val failure = gcFailure(e, match, target, alternatives = targets.size > 1)
+            failures += failure
+            // Budget deferrals and rate limits have their own timers; space everything else for this match.
+            if (e !is GcRequestDeferredException && e !is GcRateLimitedException &&
+                failure.reason in setOf(MetadataUnavailableReason.PROCESSING, MetadataUnavailableReason.ERROR)) {
+                val queries = (gcAnswers[match]?.queries ?: 0) + 1
+                gcAnswers[match] = GcAnswer(queries, clock() + GC_QUERY_SPACING[(queries - 1).coerceAtMost(GC_QUERY_SPACING.lastIndex)], failure.reason)
+            }
             return null
         } ?: return null
+        gcAnswers.remove(match)
         if (reference.matchId != match) {
             println("GC returned a reference for match ${reference.matchId} instead of $match.")
             return null.also { failures += Failure(MetadataUnavailableReason.ERROR) }
@@ -175,10 +208,10 @@ class MatchMetadataService(
      * access. An untargeted query, as deadlock-api sends, is the last resort. Lookups unconnected to a
      * registered player never spend this bot's GC budget.
      */
-    private fun gcTargets(gc: MatchHistoryProvider, account: String?, people: List<String>): List<String> {
-        if (people.isEmpty() && account == null) return emptyList()
-        val known = people.sortedWith(compareBy({ gc.friendship(it) != SteamFriendship.FRIEND }, { it != account }))
-        return known.ifEmpty { listOfNotNull(account) } + UNTARGETED
+    private fun gcTargets(gc: MatchHistoryProvider, player: String?, people: List<String>, registered: Boolean): List<String> {
+        if (people.isEmpty() && !registered) return emptyList()
+        val known = people.sortedWith(compareBy({ gc.friendship(it) != SteamFriendship.FRIEND }, { it != player }))
+        return known.ifEmpty { listOfNotNull(player) } + UNTARGETED
     }
 
     private fun gcFailure(e: Exception, match: Long, target: String, alternatives: Boolean) = when (e) {
@@ -209,9 +242,12 @@ class MatchMetadataService(
         return find(match)?.takeIf { valid(it, match) }?.also(::remember)
     }
     private fun remember(info: MatchDTO) = synchronized(completed) { completed[info.matchInfo.matchId] = info }
+    /** Cheap sources are re-checked quickly (15s, 30s, 1m, 2m, …, 15m); a GC that frees up sooner is not missed. */
     private fun defer(key: Key, outcome: MetadataLookup.Unavailable): Long {
-        val attempts = ((pending.remove(key)?.attempts ?: 0) + 1).coerceAtMost(6)
-        val delay = (30_000L shl (attempts - 1)).coerceAtMost(15 * 60_000L)
+        val attempts = ((pending.remove(key)?.attempts ?: 0) + 1).coerceAtMost(7)
+        val backoff = (15_000L shl (attempts - 1)).coerceAtMost(15 * 60_000L)
+        val delay = outcome.retryInMillis?.takeIf { outcome.reason == MetadataUnavailableReason.WAITING_FOR_LOOKUP }
+            ?.coerceIn(5_000L, backoff) ?: backoff
         // Re-inserting rotates retries so one stubborn match cannot monopolize background attempts.
         pending[key] = Retry(attempts, clock() + delay, outcome)
         while (pending.size > 512) pending.remove(pending.keys.first())
@@ -236,10 +272,13 @@ class MatchMetadataService(
 
     private companion object {
         const val UNTARGETED = ""
+        const val BUSY_RECHECK_MILLIS = 5_000L
         /** Each source has its own timeout; this only stops a lookup that is stuck. */
         const val LOOKUP_TIMEOUT_MILLIS = 120_000L
         /** A metadata salt does not change, and Valve keeps the file long after publishing it. */
         const val REFERENCE_TTL_MILLIS = 24 * 60 * 60_000L
+        /** Gaps between GC queries for one match that Valve has not finished; after the last, only cheap sources. */
+        val GC_QUERY_SPACING = longArrayOf(60_000L, 3 * 60_000L, 10 * 60_000L, 30 * 60_000L, 60 * 60_000L, 60 * 60_000L)
         fun <V> bounded() = object : LinkedHashMap<Long, V>() {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, V>) = size > 512
         }

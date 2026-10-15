@@ -12,6 +12,8 @@ import api.MatchMetadataService
 import api.PlayerNameService
 import api.SteamAccountResolver
 import api.gc.ValveMetadataClient
+import api.gc.GcMetadataBudget
+import data.GcQueryLog
 import data.UserRepository
 import dev.kord.core.Kord
 import dev.kord.gateway.DefaultGateway
@@ -87,6 +89,13 @@ private fun buildGcProvider(): MatchHistoryProvider? {
         initialRefreshToken = Env.STEAM_REFRESH_TOKEN,
         tokenFile = java.io.File(Env.STEAM_TOKEN_FILE),
         autoAcceptFriends = Env.STEAM_AUTO_ACCEPT_FRIENDS,
-        metadataIntervalMillis = Env.STEAM_METADATA_INTERVAL_SECONDS * 1000,
+        metadataBudget = GcMetadataBudget(
+            limit = Env.STEAM_METADATA_DAILY_LIMIT,
+            minIntervalMillis = Env.STEAM_METADATA_INTERVAL_SECONDS * 1000,
+            load = { GcQueryLog.since(System.currentTimeMillis() - DAY_MILLIS) },
+            record = { GcQueryLog.record(it, pruneBefore = it - DAY_MILLIS) },
+        ),
     ).also { it.start() })
 }
+
+private const val DAY_MILLIS = 24 * 60 * 60_000L
