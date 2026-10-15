@@ -1,0 +1,33 @@
+# Bot-only handover: the existing Compose project continues to own PostgreSQL.
+# Import as a Git-based Compose Application in RAW mode; disable auto deploys.
+services:
+  app:
+    image: ghcr.io/abdullah2808/deadlockbot@${IMAGE_DIGEST:?Select a published sha256 digest}
+    container_name: deadlockbot-production
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    mem_limit: 1g
+    env_file:
+      - ${BOT_ENV_FILE:?Absolute path to the existing .env}
+    environment:
+      DB_URL: postgresql://db:5432/main
+      STEAM_TOKEN_FILE: /app/state/steam_refresh_token.txt
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx512m -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError"
+    volumes:
+      - type: bind
+        source: ${BOT_STATE_DIR:?Absolute path to existing state directory}
+        target: /app/state
+        bind:
+          create_host_path: false
+    networks:
+      - existing_db
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  existing_db:
+    external: true
+    name: ${EXISTING_DB_NETWORK:?Exact existing Compose network with db alias}

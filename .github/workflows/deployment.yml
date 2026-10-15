@@ -5,6 +5,10 @@ on:
     branches: [main]
 permissions:
   contents: read
+# Serialize reruns for a commit; never overwrite an existing SHA publication.
+concurrency:
+  group: container-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: false
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -24,12 +28,68 @@ jobs:
           DB_USER: ci
           DB_PASSWORD: ci-placeholder
           DISCORD_TOKEN: ci-placeholder
+      - name: Validate production Compose with disposable placeholders
+        run: |
+          touch /tmp/deadlockbot-ci.env
+          mkdir /tmp/deadlockbot-ci-state
+          docker compose -f deploy/compose.coolify.yml config --quiet
+        env:
+          IMAGE_DIGEST: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          BOT_ENV_FILE: /tmp/deadlockbot-ci.env
+          BOT_STATE_DIR: /tmp/deadlockbot-ci-state
+          EXISTING_DB_NETWORK: ci-unused-network
+      - name: Verify dashboard override replaces wildcard ports
+        shell: bash
+        env:
+          TAILSCALE_IPV4: 100.100.100.100
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          services = {name: {"image": "alpine:3"} for name in ("coolify", "postgres", "redis")}
+          services["coolify"]["ports"] = ["8000:8080", "6001:6001", "6002:6002"]
+          Path("/tmp/dashboard-base.json").write_text(json.dumps({"services": services}))
+          PY
+          docker compose -f /tmp/dashboard-base.json -f deploy/coolify-dashboard.override.yml config --format json > /tmp/dashboard.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          ports = json.loads(Path("/tmp/dashboard.json").read_text())["services"]["coolify"]["ports"]
+          assert len(ports) == 3, ports
+          assert all(p["host_ip"] == "100.100.100.100" for p in ports), ports
+          PY
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: false
+          load: true
+          tags: deadlockbot:ci
+      - name: Verify image refuses overlapping bot processes and releases lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          state=$(mktemp -d)
+          trap 'docker rm -f singleton-holder >/dev/null 2>&1 || true; sudo rm -rf "$state"' EXIT
+          docker run -d --name singleton-holder -v "$state:/app/state" deadlockbot:ci sleep 120
+          for attempt in {1..30}; do
+            test -f "$state/.bot.lock" && break
+            sleep 1
+          done
+          test -f "$state/.bot.lock"
+          # Wait until the holder has actually acquired the lock.
+          for attempt in {1..30}; do
+            if ! sudo flock -n "$state/.bot.lock" true; then break; fi
+            sleep 1
+          done
+          if sudo flock -n "$state/.bot.lock" true; then exit 1; fi
+          if docker run --rm -v "$state:/app/state" deadlockbot:ci true; then
+            echo 'Second process unexpectedly acquired the lock' >&2
+            exit 1
+          fi
+          docker stop singleton-holder
+          docker run --rm -v "$state:/app/state" deadlockbot:ci true
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: verify
@@ -45,11 +105,39 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check for an existing SHA publication
+        id: existing
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/abdullah2808/deadlockbot:${GITHUB_SHA}"
+          if docker buildx imagetools inspect "$image" > /tmp/manifest 2> /tmp/manifest-error; then
+            echo 'found=true' >> "$GITHUB_OUTPUT"
+          elif grep -Eiq 'manifest unknown|not found' /tmp/manifest-error; then
+            echo 'found=false' >> "$GITHUB_OUTPUT"
+          else
+            cat /tmp/manifest-error >&2
+            exit 1
+          fi
       - uses: docker/build-push-action@v6
+        if: steps.existing.outputs.found != 'true'
         with:
           context: .
           platforms: linux/amd64
           push: true
-          tags: |
-            ghcr.io/abdullah2808/deadlockbot:latest
-            ghcr.io/abdullah2808/deadlockbot:${{ github.sha }}
+          tags: ghcr.io/abdullah2808/deadlockbot:${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+      - name: Report candidate for manual approval in Coolify
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/abdullah2808/deadlockbot:${GITHUB_SHA}"
+          docker buildx imagetools inspect "$image" > /tmp/published-manifest
+          digest=$(awk '$1 == "Digest:" {print $2; exit}' /tmp/published-manifest)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          {
+            echo '### Published candidate — production unchanged'
+            echo "Commit: \`$GITHUB_SHA\`"
+            echo "IMAGE_DIGEST: \`$digest\`"
+            echo 'After reviewing CI, set this digest in Coolify and manually Deploy.'
+          } >> "$GITHUB_STEP_SUMMARY"

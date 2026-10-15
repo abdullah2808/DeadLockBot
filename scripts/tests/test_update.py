@@ -104,6 +104,16 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(updater.env_file.read_text(), original)
         self.assertEqual(len(commands.calls), 1)
 
+    def test_coolify_handover_blocks_update_and_rollback_before_any_commands(self):
+        commands = FakeCommands()
+        updater, original = self.run_update(commands)
+        (updater.root / ".coolify-managed").touch()
+        for operation in (updater.update, updater.rollback):
+            with self.assertRaisesRegex(UpdateError, "Coolify owns"):
+                operation()
+        self.assertEqual(commands.calls, [])
+        self.assertEqual(updater.env_file.read_text(), original)
+
     def test_tag_edit_does_not_evaluate_shell_values(self):
         original = "SECRET='$(do-not-run)'\r\nIMAGE_TAG='old'\r\n"
         self.assertEqual(set_tag(original, "abc"), "SECRET='$(do-not-run)'\r\nIMAGE_TAG=abc\r\n")

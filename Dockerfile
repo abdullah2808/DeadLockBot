@@ -18,7 +18,9 @@ RUN --mount=type=secret,id=proxy_ca \
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core \
+RUN apt-get update && apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core util-linux \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/build/libs/*-all.jar app.jar
+COPY scripts/container-entrypoint.sh /usr/local/bin/deadlockbot-entrypoint
+ENTRYPOINT ["sh", "/usr/local/bin/deadlockbot-entrypoint"]
 CMD ["java", "-Djava.awt.headless=true", "-jar", "app.jar"]

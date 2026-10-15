@@ -61,6 +61,8 @@ class Updater:
         return self.command("docker", "compose", *args, capture=capture)
 
     def preflight(self):
+        if (self.root / ".coolify-managed").exists():
+            raise UpdateError("Coolify owns the bot. Select an approved digest in its UI; do not run the legacy updater.")
         if not self.env_file.is_file():
             raise UpdateError("Create .env and complete initial setup first.")
         if self.command("git", "status", "--porcelain", "--untracked-files=no", capture=True):
