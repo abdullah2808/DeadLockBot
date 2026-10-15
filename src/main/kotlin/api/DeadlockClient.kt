@@ -7,7 +7,9 @@ import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.HttpStatusCode
@@ -24,6 +26,7 @@ class DeadlockClient(
     private val client: HttpClient = defaultHttpClient(),
     private val retryDelayMillis: Long = 10_000L,
     private val metadataGate: MetadataRequestGate = sharedMetadataGate,
+    private val apiKey: String? = sharedApiKey,
 ) {
 
     suspend fun getRecentMatch(accountId: String): List<MatchHistoryDTO> {
@@ -146,18 +149,31 @@ class DeadlockClient(
         throw RuntimeException("Failed to fetch active matches. Last error: ${lastError?.message ?: "unknown"}")
     }
 
-    suspend fun getMatchByMatchID(matchId: Long): MatchDTO? = metadataGate.request(matchId) {
+    /** Stored metadata only; a miss never makes deadlock-api contact Steam. */
+    suspend fun getMatchByMatchID(matchId: Long): MatchDTO? = metadataGate.request(matchId) { fetchMetadata(matchId, steam = false) }
+
+    /**
+     * Lets deadlock-api fetch a missing match from Steam with its own bots and quota (three per hour per IP,
+     * 300 with a key), which is separate from this bot's GC budget. Throws [MetadataDeferredException] while paced.
+     */
+    suspend fun getMatchFromSteam(matchId: Long): MatchDTO? = metadataGate.requestFromSteam(matchId) { fetchMetadata(matchId, steam = true) }
+
+    private suspend fun fetchMetadata(matchId: Long, steam: Boolean): MatchDTO? {
         val url = "https://api.deadlock-api.com/v1/matches/$matchId/metadata"
-        try {
-            val response = client.get(url) { parameter("disable_steam", true) }
+        return try {
+            val response = client.get(url) {
+                if (steam) timeout { requestTimeoutMillis = 25_000 } else parameter("disable_steam", true)
+                apiKey?.let { header("X-API-Key", it) }
+            }
             if (response.status.isSuccess()) {
-                response.body<MatchDTO>().also { metadataGate.succeeded() }
+                response.body<MatchDTO>().also { if (steam) metadataGate.steamSucceeded() else metadataGate.succeeded() }
             } else {
                 if (response.status == HttpStatusCode.TooManyRequests ||
                     (response.status == HttpStatusCode.ServiceUnavailable && response.headers[HttpHeaders.RetryAfter] != null)) {
-                    metadataGate.rateLimited(response.headers[HttpHeaders.RetryAfter])
+                    val retryAfter = response.headers[HttpHeaders.RetryAfter]
+                    if (steam) metadataGate.steamRateLimited(retryAfter) else metadataGate.rateLimited(retryAfter)
                 }
-                println("Metadata unavailable for match $matchId (HTTP ${response.status.value}).")
+                println("${if (steam) "Steam-backed" else "Stored"} metadata unavailable for match $matchId (HTTP ${response.status.value}).")
                 null
             }
         } catch (e: CancellationException) {
@@ -174,8 +190,11 @@ class DeadlockClient(
 
     companion object {
         private var sharedMetadataGate = MetadataRequestGate()
-        fun configureMetadataCache(find: (Long) -> MatchDTO?, save: (MatchDTO) -> Unit) {
-            sharedMetadataGate = MetadataRequestGate(find = find, save = save)
+        private var sharedApiKey: String? = null
+        fun configureMetadataCache(find: (Long) -> MatchDTO?, save: (MatchDTO) -> Unit, apiKey: String? = null) {
+            sharedApiKey = apiKey
+            sharedMetadataGate = MetadataRequestGate(find = find, save = save, steamIntervalMillis =
+                if (apiKey != null) MetadataRequestGate.KEYED_STEAM_INTERVAL_MILLIS else MetadataRequestGate.KEYLESS_STEAM_INTERVAL_MILLIS)
         }
         private fun defaultHttpClient(): HttpClient = HttpClient(CIO) {
             install(HttpTimeout) { requestTimeoutMillis = 8_000; connectTimeoutMillis = 5_000 }

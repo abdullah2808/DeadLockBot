@@ -46,4 +46,11 @@ object Env {
     val STEAM_AUTO_ACCEPT_FRIENDS: Boolean = optional("STEAM_AUTO_ACCEPT_FRIENDS")?.let {
         it.lowercase().toBooleanStrictOrNull() ?: error("STEAM_AUTO_ACCEPT_FRIENDS must be true or false")
     } ?: true
+
+    // Optional deadlock-api.com key: raises its Steam-backed metadata quota from 3 to 300 lookups per hour.
+    val DEADLOCK_API_KEY: String? = optional("DEADLOCK_API_KEY")
+    // Let deadlock-api fetch missing matches from Steam with its own quota before this bot spends a GC query.
+    val DEADLOCK_API_STEAM_FALLBACK: Boolean = optional("DEADLOCK_API_STEAM_FALLBACK")?.let {
+        it.lowercase().toBooleanStrictOrNull() ?: error("DEADLOCK_API_STEAM_FALLBACK must be true or false")
+    } ?: true
 }

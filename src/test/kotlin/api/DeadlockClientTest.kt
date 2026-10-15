@@ -47,6 +47,34 @@ class DeadlockClientTest {
         api.close()
     }
 
+    @Test fun `Steam-backed metadata lets deadlock-api ask Steam, sends the key and is paced`() = runTest {
+        var now = 0L
+        val requests = mutableListOf<io.ktor.client.request.HttpRequestData>()
+        val client = mockClient { request -> requests += request; respond("{}", HttpStatusCode.NotFound) }
+        val api = DeadlockClient(client, 0, MetadataRequestGate(clock = { now }, steamIntervalMillis = 60_000), apiKey = "key")
+        assertNull(api.getMatchFromSteam(99))
+        assertNull(requests.single().url.parameters["disable_steam"])
+        assertEquals("key", requests.single().headers["X-API-Key"])
+        assertEquals(60_000L, assertFailsWith<MetadataDeferredException> { api.getMatchFromSteam(100) }.retryAfterMillis)
+        now = 60_000
+        assertNull(api.getMatchFromSteam(100))
+        assertEquals(2, requests.size)
+    }
+
+    @Test fun `a Steam-backed rate limit does not pause stored metadata lookups`() = runTest {
+        var stored = 0
+        val client = mockClient { request ->
+            if (request.url.parameters["disable_steam"] == "true") { stored++; respond("{}", HttpStatusCode.NotFound) }
+            else respond("{}", HttpStatusCode.TooManyRequests, headersOf(HttpHeaders.RetryAfter, "3600"))
+        }
+        val api = DeadlockClient(client, 0, MetadataRequestGate(clock = { 0L }, steamIntervalMillis = 0))
+        assertNull(api.getMatchFromSteam(99))
+        assertEquals(3_600_000L, assertFailsWith<MetadataDeferredException> { api.getMatchFromSteam(100) }.retryAfterMillis)
+        assertNull(api.getMatchByMatchID(99))
+        assertNull(api.getMatchByMatchID(100))
+        assertEquals(2, stored)
+    }
+
     private val sampleMatchHistoryJson = """
         [
           {

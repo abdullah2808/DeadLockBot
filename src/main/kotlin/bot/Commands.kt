@@ -7,6 +7,8 @@ import api.gc.MatchHistoryProvider
 import api.gc.GcHistoryPermissionException
 import api.gc.SteamFriendship
 import api.MatchMetadataService
+import api.MetadataLookup
+import api.MetadataUnavailableReason
 import api.PlayerNameService
 import api.asDiscordTitleText
 import kotlinx.coroutines.CancellationException
@@ -163,7 +165,7 @@ private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, 
     val client = DeadlockClient()
     try {
         val fetchMetadata: suspend (Long) -> models.MatchDTO? = { id ->
-            if (metadata != null) metadata.metadataFor(accountId, id) else client.getMatchByMatchID(id)
+            if (metadata != null) metadata.metadataFor(accountId, id, interactive = true) else client.getMatchByMatchID(id)
         }
         val result = RecentMatchLookup(gc, client::getRecentMatch, fetchMetadata).lookup(accountId, 1)
         val match = result.matches.firstOrNull()
@@ -233,7 +235,7 @@ private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kor
     val client = DeadlockClient()
     try {
         val result = RecentMatchLookup(gc, client::getRecentMatch, { id ->
-            if (metadata != null) metadata.metadataFor(user.accountId, id) else client.getMatchByMatchID(id)
+            if (metadata != null) metadata.metadataFor(user.accountId, id, interactive = true) else client.getMatchByMatchID(id)
         }).lookup(user.accountId, 5)
         val waiting = result.unavailableIds.takeIf { it.isNotEmpty() }?.joinToString { "`$it`" }
         val notice = waiting?.let { "Waiting for match details: $it. Some recent matches are not shown yet." }
@@ -261,6 +263,32 @@ private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kor
 
 internal fun parseMatchId(value: String): Long? = value.trim().removePrefix("match_id:").trim().toLongOrNull()?.takeIf { it > 0 }
 
+/** Say why a report can't be built yet, rather than always blaming processing. */
+internal fun metadataUnavailableMessage(matchId: Long, outcome: MetadataLookup.Unavailable, canSignUp: Boolean = false): String {
+    val retry = outcome.retryInMillis?.takeIf { it > 0 }?.let {
+        val minutes = ((it + 59_999) / 60_000).coerceAtLeast(1)
+        " Try again in about $minutes minute${if (minutes == 1L) "" else "s"}."
+    } ?: " Try again in a few minutes."
+    val background = if (outcome.retrying) " The bot keeps retrying in the background." else ""
+    return when (outcome.reason) {
+        MetadataUnavailableReason.INVALID_MATCH ->
+            "Valve reports no metadata for match `$matchId`. The match may have been cancelled, or the ID may be wrong."
+        MetadataUnavailableReason.ACCESS_DENIED ->
+            "Valve denied the bot access to match `$matchId`. A registered player from this match can add the Steam bot " +
+                "(see `/steambot`); Valve's privacy rules decide whether that grants access."
+        MetadataUnavailableReason.PROCESSING ->
+            "Valve is still publishing the data for match `$matchId`; this usually takes a few minutes after a match ends.$retry$background"
+        MetadataUnavailableReason.WAITING_FOR_LOOKUP ->
+            "Match `$matchId` isn't in the public Deadlock API archive yet, and the bot's Steam lookups are paced " +
+                "to avoid Valve rate limits.$retry$background"
+        MetadataUnavailableReason.NOT_STORED ->
+            "Match `$matchId` isn't in the public Deadlock API archive yet.$retry$background" +
+                if (canSignUp) " Matches with a registered player can be fetched from Valve directly; use `/signup` to link your account." else ""
+        MetadataUnavailableReason.ERROR ->
+            "Full metadata for match `$matchId` is temporarily unavailable from both the public API and Valve.$retry$background"
+    }
+}
+
 private suspend fun handleMatch(interaction: ActionInteraction, gc: MatchHistoryProvider?, metadata: MatchMetadataService?,
                                 rawMatchId: String?, privateResponse: Boolean = false) {
     // Acknowledge before API calls and image rendering to keep the interaction alive.
@@ -277,18 +305,29 @@ private suspend fun handleMatch(interaction: ActionInteraction, gc: MatchHistory
     }
     val client = DeadlockClient()
     try {
-        val fetchMetadata: suspend (Long) -> models.MatchDTO? = { id ->
-            if (metadata != null && user != null) metadata.metadataFor(user.accountId, id) else client.getMatchByMatchID(id)
+        // Unregistered viewers (e.g. clicking another player's notification) still reach tracked participants' GC access.
+        val fetchMetadata: suspend (Long) -> MetadataLookup = { id ->
+            metadata?.lookup(user?.accountId, id, interactive = true)
+                ?: client.getMatchByMatchID(id)?.let { MetadataLookup.Found(it) }
+                ?: MetadataLookup.Unavailable(MetadataUnavailableReason.NOT_STORED)
         }
-        val recent = if (requestedId == null) RecentMatchLookup(gc, client::getRecentMatch, fetchMetadata).lookup(user!!.accountId, 1) else null
+        val recent = if (requestedId == null) RecentMatchLookup(gc, client::getRecentMatch) { id ->
+            (fetchMetadata(id) as? MetadataLookup.Found)?.match
+        }.lookup(user!!.accountId, 1) else null
         val matchId = requestedId ?: recent?.latestId ?: recent?.matches?.firstOrNull()?.matchId
         if (matchId == null) {
             response.respond { content = "No recent matches found for your linked account." }
             return
         }
-        val match = recent?.metadata?.get(matchId) ?: fetchMetadata(matchId)
-        if (match == null || match.matchInfo.players.isEmpty()) {
-            response.respond { content = "Full metadata for match `$matchId` is unavailable. It may still be processing; try again later." }
+        val lookup = recent?.metadata?.get(matchId)?.let { MetadataLookup.Found(it) } ?: fetchMetadata(matchId)
+        val match = (lookup as? MetadataLookup.Found)?.match?.takeIf { it.matchInfo.players.isNotEmpty() }
+        if (match == null) {
+            val outcome = lookup as? MetadataLookup.Unavailable ?: MetadataLookup.Unavailable(MetadataUnavailableReason.ERROR)
+            println("Full match report for $matchId unavailable: ${outcome.reason}.")
+            response.respond {
+                content = metadataUnavailableMessage(matchId, outcome, canSignUp = user == null && gc != null)
+                if (outcome.reason == MetadataUnavailableReason.ACCESS_DENIED) steamBotButton(gc)
+            }
             return
         }
         val assets = ScoreboardAssetLoader.load(match)

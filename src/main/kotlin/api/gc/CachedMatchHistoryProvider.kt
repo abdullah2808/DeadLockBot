@@ -26,7 +26,7 @@ class CachedMatchHistoryProvider(
         snapshot
     }
     override suspend fun cachedMatch(accountId: String, matchId: Long): MatchHistoryDTO? = find(accountId, matchId)
-    override suspend fun metadataDownload(accountId: String, matchId: Long) = delegate.metadataDownload(accountId, matchId)
+    override suspend fun metadataDownload(targetAccountId: String?, matchId: Long) = delegate.metadataDownload(targetAccountId, matchId)
     override fun steamBotIdentity() = delegate.steamBotIdentity()
     override fun steamPlayerName(accountId: String) = delegate.steamPlayerName(accountId)
     override fun friendship(accountId: String) = delegate.friendship(accountId)

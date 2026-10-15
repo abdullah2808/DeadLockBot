@@ -21,14 +21,17 @@ internal class GcRequestGate(
     private var limitedOperation: Int? = null
     private val nextQuery = mutableMapOf<Int, Long>()
 
-    suspend fun <T> request(operation: Int, result: (T) -> Int, fetch: suspend () -> T): T = mutex.withLock {
+    /**
+     * [fetch] calls its argument immediately before the message leaves this process. Only then is the
+     * pacing interval reserved: a session that never became ready must not spend a scarce query.
+     */
+    suspend fun <T> request(operation: Int, result: (T) -> Int, fetch: suspend (sending: () -> Unit) -> T): T = mutex.withLock {
         val now = clock()
         if (now < retryAt) throw GcRateLimitedException(retryAt - now)
         val due = nextQuery[operation] ?: Long.MIN_VALUE
         if (now < due) throw GcRequestDeferredException(due - now)
-        // Reserve before sending; even a timeout or denied request may count against Valve's quota.
-        intervals[operation]?.let { nextQuery[operation] = now + it }
-        val response = fetch()
+        // Reserve once sent; even a timeout or denied request may count against Valve's quota.
+        val response = fetch { intervals[operation]?.let { nextQuery[operation] = clock() + it } }
         when (result(response)) {
             5 -> { // Both Deadlock history and metadata enums use 5 for RateLimited.
                 attempts = (attempts + 1).coerceAtMost(5)

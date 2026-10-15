@@ -12,7 +12,7 @@ class GcRequestGateTest {
         var now = 0L
         var sends = 0
         val gate = GcRequestGate(mapOf(9168 to 1_800_000L)) { now }
-        suspend fun query(type: Int, result: Int = 1) = gate.request(type, { it: Int -> it }) { sends++; result }
+        suspend fun query(type: Int, result: Int = 1) = gate.request(type, { it: Int -> it }) { sending -> sending(); sends++; result }
         assertEquals(1, query(9168))
         assertEquals(1_800_000L, assertFailsWith<GcRequestDeferredException> { query(9168) }.retryAfterMillis)
         assertEquals(1, query(9113))
@@ -21,6 +21,13 @@ class GcRequestGateTest {
         assertEquals(2, query(9168, 2))
         assertFailsWith<GcRequestDeferredException> { query(9168) }
         assertEquals(3, sends)
+    }
+    @Test fun `a query that never left the process does not spend the metadata interval`() = runTest {
+        val gate = GcRequestGate(mapOf(9168 to 1_800_000L)) { 0L }
+        assertFailsWith<IOException> { gate.request<Int>(9168, { it }) { throw IOException("GC session not ready") } }
+        assertFailsWith<CancellationException> { gate.request<Int>(9168, { it }) { throw CancellationException() } }
+        assertEquals(1, gate.request(9168, { it: Int -> it }) { sending -> sending(); 1 })
+        assertFailsWith<GcRequestDeferredException> { gate.request(9168, { it: Int -> it }) { 1 } }
     }
     @Test fun `cooldown blocks both endpoints without sending and permits probe at expiry`() = runTest {
         var now = 0L

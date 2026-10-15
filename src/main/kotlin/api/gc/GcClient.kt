@@ -43,7 +43,8 @@ interface MatchHistoryProvider {
     suspend fun recentMatchIds(accountId: String): List<Long>
     suspend fun recentHistory(accountId: String): MatchHistorySnapshot = MatchHistorySnapshot(recentMatchIds(accountId), emptyList())
     suspend fun cachedMatch(accountId: String, matchId: Long): MatchHistoryDTO? = null
-    suspend fun metadataDownload(accountId: String, matchId: Long): GcMetadataDownload? = null
+    /** [targetAccountId] names a participant whose privacy grants access; null sends an untargeted query. */
+    suspend fun metadataDownload(targetAccountId: String?, matchId: Long): GcMetadataDownload? = null
     fun steamBotIdentity(): SteamBotIdentity? = null
     fun steamPlayerName(accountId: String): String? = null
     fun friendship(accountId: String): SteamFriendship = SteamFriendship.UNKNOWN
@@ -55,6 +56,11 @@ interface MatchHistoryProvider {
 
 data class MatchHistorySnapshot(val ids: List<Long>, val summaries: List<MatchHistoryDTO>)
 class GcHistoryPermissionException(val accountId: String) : IOException("GC denied match-history access for $accountId")
+
+/** Valve's reason for withholding metadata references; rate limiting is reported by [GcRateLimitedException]. */
+enum class GcMetadataFailure { DENIED, INVALID_MATCH, IN_FLIGHT, NOT_READY, BUSY }
+class GcMetadataException(val matchId: Long, val failure: GcMetadataFailure, detail: String) :
+    IOException("GC metadata unavailable for $matchId: $detail")
 
 /** Authenticated Steam GC session shared by history, metadata, and incoming friend acceptance. */
 class GcClient(
@@ -156,20 +162,16 @@ class GcClient(
         return MatchHistorySnapshot(body.matchesList.map { it.matchId }, summaries)
     }
 
-    override suspend fun metadataDownload(accountId: String, matchId: Long): GcMetadataDownload? {
+    override suspend fun metadataDownload(targetAccountId: String?, matchId: Long): GcMetadataDownload? {
         val body = request(MSG_METADATA_RESPONSE) { job ->
             val message = ClientGCMsgProtobuf<CitadelMatchHistory.CMsgClientToGCGetMatchMetaData.Builder>(
                 CitadelMatchHistory.CMsgClientToGCGetMatchMetaData::class.java, MSG_GET_METADATA)
             message.sourceJobID = job
             message.body.matchId = matchId
-            message.body.targetAccountId = accountId.toLong().toInt()
+            targetAccountId?.let { message.body.targetAccountId = it.toLong().toInt() }
             gameCoordinator.send(message, DEADLOCK_APP_ID)
         } as CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse
-        if (body.result != CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse.EResult.k_eResult_Success)
-            throw IOException("GC metadata unavailable for $matchId: ${body.result}")
-        if (!body.hasMetadataSalt() || body.metadataSalt == 0 || !body.hasReplayGroupId() || body.replayGroupId == 0)
-            throw IOException("GC metadata download references are not ready for $matchId")
-        return GcMetadataDownload(matchId, body.replayGroupId.toUInt().toLong(), body.metadataSalt.toUInt().toLong())
+        return metadataReference(matchId, body)
     }
 
     private suspend fun request(responseType: Int, send: (JobID) -> Unit): Message = requestGate.request<Message>(
@@ -179,13 +181,14 @@ class GcClient(
             is CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse -> response.result.number
             else -> error("Unexpected GC response: ${response.javaClass.simpleName}")
         } },
-    ) {
+    ) { sending ->
         var answer: CompletableDeferred<Message>? = null
         try {
             withTimeout(REQUEST_TIMEOUT_MS) { welcome.await() }
             val job = steamClient.getNextJobID()
             val waiting = router.expect(responseType, job.value)
             answer = waiting
+            sending()
             send(job)
             withTimeout(REQUEST_TIMEOUT_MS) { waiting.await() }
         } catch (e: TimeoutCancellationException) {
@@ -295,6 +298,21 @@ class GcClient(
             }
         } catch (e: Exception) { router.fail(IOException("Could not decode GC response", e)) }
     }
+}
+
+/** Classify the GC's answer so callers can tell a denied target from a match Valve is still processing. */
+internal fun metadataReference(matchId: Long, body: CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse): GcMetadataDownload {
+    val failure = when (body.result) {
+        CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse.EResult.k_eResult_Success -> null
+        CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse.EResult.k_eResult_InvalidPermission -> GcMetadataFailure.DENIED
+        CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse.EResult.k_eResult_InvalidMatch -> GcMetadataFailure.INVALID_MATCH
+        CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse.EResult.k_eResult_MatchInFlight -> GcMetadataFailure.IN_FLIGHT
+        else -> GcMetadataFailure.BUSY
+    }
+    if (failure != null) throw GcMetadataException(matchId, failure, body.result.toString())
+    if (!body.hasMetadataSalt() || body.metadataSalt == 0 || !body.hasReplayGroupId() || body.replayGroupId == 0)
+        throw GcMetadataException(matchId, GcMetadataFailure.NOT_READY, "download references are not ready")
+    return GcMetadataDownload(matchId, body.replayGroupId.toUInt().toLong(), body.metadataSalt.toUInt().toLong())
 }
 
 /** Write privately, then replace the old token only after a complete write. */

@@ -36,6 +36,14 @@ class MatchCacheRepositoryTest {
             assertEquals(3L, CachedPlayerMatchTable.selectAll().count())
         }
     }
+    @Test fun `participants lists every account retaining a match`() {
+        setup()
+        MatchCacheRepository.save("107", listOf(match(99, 107)))
+        MatchCacheRepository.save("208", listOf(match(99, 208), match(100, 208)))
+        assertEquals(setOf("107", "208"), MatchCacheRepository.participants(99).toSet())
+        assertEquals(listOf("208"), MatchCacheRepository.participants(100))
+        assertEquals(emptyList(), MatchCacheRepository.participants(101))
+    }
     private fun setup() {
         Database.connect("jdbc:h2:mem:cache-${System.nanoTime()};DB_CLOSE_DELAY=-1", driver = "org.h2.Driver")
         transaction { SchemaUtils.create(CachedMatchTable, CachedPlayerMatchTable) }

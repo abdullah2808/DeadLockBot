@@ -34,7 +34,7 @@ import kotlinx.coroutines.withContext
 suspend fun main() = coroutineScope {
     DatabaseFactory.init()
     // The shared service persists GC and API results through the same participant-aware cache.
-    DeadlockClient.configureMetadataCache(MatchCacheRepository::findMetadata) {}
+    DeadlockClient.configureMetadataCache(MatchCacheRepository::findMetadata, {}, apiKey = Env.DEADLOCK_API_KEY)
     val kord = Kord(Env.DISCORD_TOKEN) {
         gateways { resources, shards ->
             val limiter = IdentifyRateLimiter(resources.maxConcurrency, defaultDispatcher)
@@ -52,9 +52,11 @@ suspend fun main() = coroutineScope {
     val apiClient = DeadlockClient()
     val valveClient = ValveMetadataClient()
     val metadata = MatchMetadataService(gcProvider, valveClient::download, apiClient::getMatchByMatchID,
+        steamFallback = if (Env.DEADLOCK_API_STEAM_FALLBACK) apiClient::getMatchFromSteam else null,
         find = MatchCacheRepository::findMetadata,
         save = { MatchCacheRepository.saveEnrichedMetadata(it, UserRepository.getAllUsers().map { user -> user.accountId }.toSet()) },
-        knownMatch = { account, match -> MatchCacheRepository.find(account, match) != null })
+        knownMatch = { account, match -> MatchCacheRepository.find(account, match) != null },
+        participants = MatchCacheRepository::participants)
     val profileResolver = SteamAccountResolver()
     val playerNames = PlayerNameService(steamName = { gcProvider?.steamPlayerName(it) }, profileName = profileResolver::playerName)
     handleCommands(kord, gcProvider, metadata, playerNames)

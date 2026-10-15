@@ -188,10 +188,13 @@ commands reuse GC snapshots for up to 30 seconds; successful metadata is also
 cached by match ID. /recentmatch and /lastfive use GC history when configured,
 and identify missing details instead of presenting stale API history as current.
 Basic notifications can be delivered without external metadata; damage/healing
-and team rank are optional enhancements. Detailed metadata is requested from
-the GC first, downloaded from Valve's replay server, and decoded locally.
-The public API is a fallback. Its HTTP 429 honors Retry-After and a
-shared cooldown. Missing basic data remains pending with retry delays capped at
+and team rank are optional enhancements. Detailed metadata comes from stored
+public API data when available, then deadlock-api's Steam-backed lookup, then
+the bot's paced GC query, whose file is downloaded from Valve's replay server
+and decoded locally. HTTP 429 honors Retry-After, with separate cooldowns for
+stored and Steam-backed lookups. Set `DEADLOCK_API_KEY` in `.env` to raise the
+Steam-backed quota from 3 to 300 lookups per hour; set
+`DEADLOCK_API_STEAM_FALLBACK=false` to use only stored data and the bot's GC. Missing basic data remains pending with retry delays capped at
 15 minutes, rather than being discarded after five failures.
 
 ### Steam friends and signup
