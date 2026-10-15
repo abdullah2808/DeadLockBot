@@ -12,6 +12,8 @@ A Kotlin Discord bot that tracks Deadlock matches and posts match recaps.
 
 The scoreboard groups all players by team and displays heroes, K/D/A, souls, player damage, objective damage, healing, team soul totals, and final shop items. The latest recorded stats snapshot supplies damage and healing. Sold items and hero ability upgrades are excluded from the inventory. Longer inventories wrap onto a second row. Your row is outlined when viewing your latest linked match.
 
+`/match` includes an **Explore match** button. It opens a private report with a hero/player selector and Stats, Build, Events, and Abilities views. Build offers final-item descriptions; Events offers filters and eight events per page. Each person can browse independently. Reports remain available for one hour, subject to a 50-report cache, and expire when the bot restarts; run `/match` again to reopen one. Descriptions use the current asset catalog.
+
 `/match` also attaches a standalone `.html` report. Download it and open it in a browser to hover/focus heroes for ability descriptions, hover/focus/tap items for descriptions and properties, select a player, and filter/scrub their purchase, sale and ability-event timeline. Images and scripts are embedded; no hosting or internet connection is needed to view the file. The PNG in Discord remains a static preview.
 
 Progression preserves recorded event order and times, including sold items. Ability events show which ability was upgraded and when, retaining raw upgrade IDs without guessing tier numbers. Events sharing a timestamp keep their original metadata order. Descriptions come from the current asset catalog, so historical patch values may differ. Older cached matches may lack progression or upgrade details; the report states when data is unavailable.
@@ -34,9 +36,11 @@ Startup also clears this application's legacy server-specific commands in server
 
 Use JDK 21. Configure the existing environment variables required by `Env` and the database, then run `./gradlew run` (`.\gradlew.bat run` on Windows). Restarting the bot registers `/match`. The bot needs **Send Messages**, **Embed Links**, and **Attach Files** permissions in the posting channel.
 
-The scoreboard uses the existing shared metadata service: Steam GC/Valve metadata when available, then the public API fallback. `/match` without an ID uses the existing recent-match lookup for the linked account. Signup, `/steambot`, the notification grace period, metadata retries and Steam player-name lookup remain in place. Valve decoding now retains item events as well as final stats.
+The scoreboard uses the shared metadata service: local cache, then stored public API metadata (`disable_steam=true`), then Steam GC download references and Valve's metadata CDN. Stored API misses never trigger a second Steam lookup through the API. Download references are reused for up to one hour after a temporary CDN failure. `/match` without an ID uses the recent-match lookup for the linked account. Signup, `/steambot`, the notification grace period, metadata retries and Steam player-name lookup remain in place.
 
 When Valve responds with `k_eResult_RateLimited`, the Steam session pauses both history and metadata queries across all accounts and matches. The cooldown starts at one minute and doubles on repeated throttling, up to 15 minutes. Cached data and the public API fallback remain available. A successful retry of the throttled endpoint resets the backoff; restarting the bot is not required. This reduces repeated requests but cannot change Valve's quota.
+
+Fresh GC metadata queries are also spaced 30 minutes apart across accounts and matches by default (`STEAM_METADATA_INTERVAL_SECONDS=1800`). This conservative client policy is separate from Valve's unknown quota and the reactive cooldown. Pacing does not block GC history or stored reports. Reports absent from the public store may take longer to enrich; basic match notifications continue. The interval and reference cache are in memory, and restarting does not reset Valve's counters. See [metadata retrieval research](docs/metadata-retrieval.md) for sources, alternatives, and limitations.
 
 For the NAS, merge the reviewed PR and wait for the main container image to publish, then run:
 

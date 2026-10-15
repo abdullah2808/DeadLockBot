@@ -39,6 +39,10 @@ object Env {
     val STEAM_TOKEN_FILE: String = optional("STEAM_TOKEN_FILE") ?: "steam_refresh_token.txt"
 
     val STEAM_REFRESH_TOKEN: String? = optional("STEAM_REFRESH_TOKEN")
+    val STEAM_METADATA_INTERVAL_SECONDS: Long = optional("STEAM_METADATA_INTERVAL_SECONDS")?.let {
+        it.toLongOrNull()?.takeIf { seconds -> seconds in 0..86_400 }
+            ?: error("STEAM_METADATA_INTERVAL_SECONDS must be between 0 and 86400")
+    } ?: 1800L
     val STEAM_AUTO_ACCEPT_FRIENDS: Boolean = optional("STEAM_AUTO_ACCEPT_FRIENDS")?.let {
         it.lowercase().toBooleanStrictOrNull() ?: error("STEAM_AUTO_ACCEPT_FRIENDS must be true or false")
     } ?: true

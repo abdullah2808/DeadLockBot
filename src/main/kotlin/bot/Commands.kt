@@ -10,6 +10,7 @@ import api.MatchMetadataService
 import api.PlayerNameService
 import api.asDiscordTitleText
 import kotlinx.coroutines.CancellationException
+import dev.kord.rest.builder.component.actionRow
 import dev.kord.core.Kord
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
@@ -64,6 +65,7 @@ suspend fun registerCommands(kord: Kord) {
 
 suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null, metadata: MatchMetadataService? = null,
                            playerNames: PlayerNameService = PlayerNameService()) {
+    registerMatchExplorer(kord)
     kord.on<ChatInputCommandInteractionCreateEvent> {
         val interaction = interaction
         when (interaction.command.rootName) {
@@ -281,9 +283,12 @@ private suspend fun handleMatch(interaction: ChatInputCommandInteraction, gc: Ma
         val highlighted = user?.accountId?.toLongOrNull()?.toInt()
         val png = withContext(Dispatchers.Default) { MatchScoreboard.render(match, matchId, assets, highlighted) }
         val html = withContext(Dispatchers.Default) { InteractiveMatchReport.render(match, matchId, assets, highlighted) }
+        val reportKey = MatchExplorer.store(match, matchId, assets)
         response.respond {
+            actionRow { interactionButton(dev.kord.common.entity.ButtonStyle.Primary, "mx:$reportKey:open") { label = "Explore match" } }
             content = "**Deadlock • Match $matchId**\nFull team scoreboard · K/D/A · souls · damage · healing · final items\n" +
-                "Download the `.html` report and open it in a browser for hero/item hover details and build timelines."
+                "Click **Explore match** for private stats, builds, abilities and event timelines. " +
+                "Download the `.html` report for the full browser view."
             addFile("deadlock-match-$matchId.png", ChannelProvider(png.size.toLong()) { ByteReadChannel(png) })
             addFile("deadlock-match-$matchId.html", ChannelProvider(html.size.toLong()) { ByteReadChannel(html) })
         }

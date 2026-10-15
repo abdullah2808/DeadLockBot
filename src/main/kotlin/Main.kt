@@ -85,5 +85,6 @@ private fun buildGcProvider(): MatchHistoryProvider? {
         initialRefreshToken = Env.STEAM_REFRESH_TOKEN,
         tokenFile = java.io.File(Env.STEAM_TOKEN_FILE),
         autoAcceptFriends = Env.STEAM_AUTO_ACCEPT_FRIENDS,
+        metadataIntervalMillis = Env.STEAM_METADATA_INTERVAL_SECONDS * 1000,
     ).also { it.start() })
 }

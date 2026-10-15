@@ -19,6 +19,33 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DeadlockClientTest {
+    @Test fun `stored metadata load shedding respects Retry-After before another match lookup`() = runTest {
+        var now = 0L
+        var requests = 0
+        val client = mockClient {
+            requests++
+            respond("{}", HttpStatusCode.ServiceUnavailable, headersOf(HttpHeaders.RetryAfter, "120"))
+        }
+        val api = DeadlockClient(client, 0, MetadataRequestGate(clock = { now }))
+        assertNull(api.getMatchByMatchID(99))
+        now = 119_999
+        assertNull(api.getMatchByMatchID(100))
+        assertEquals(1, requests)
+        now = 120_000
+        assertNull(api.getMatchByMatchID(100))
+        assertEquals(2, requests)
+        api.close()
+    }
+    @Test fun `metadata requests disable Steam fallback to avoid consuming GC quota`() = runTest {
+        val client = mockClient { request ->
+            assertEquals("true", request.url.parameters["disable_steam"])
+            assertEquals("/v1/matches/99/metadata", request.url.encodedPath)
+            respond("{}", HttpStatusCode.NotFound)
+        }
+        val api = DeadlockClient(client, 0, MetadataRequestGate())
+        assertNull(api.getMatchByMatchID(99))
+        api.close()
+    }
 
     private val sampleMatchHistoryJson = """
         [

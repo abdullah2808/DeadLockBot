@@ -6,7 +6,9 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
+import io.ktor.client.request.parameter
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.HttpHeaders
@@ -147,11 +149,12 @@ class DeadlockClient(
     suspend fun getMatchByMatchID(matchId: Long): MatchDTO? = metadataGate.request(matchId) {
         val url = "https://api.deadlock-api.com/v1/matches/$matchId/metadata"
         try {
-            val response = client.get(url)
+            val response = client.get(url) { parameter("disable_steam", true) }
             if (response.status.isSuccess()) {
                 response.body<MatchDTO>().also { metadataGate.succeeded() }
             } else {
-                if (response.status == HttpStatusCode.TooManyRequests) {
+                if (response.status == HttpStatusCode.TooManyRequests ||
+                    (response.status == HttpStatusCode.ServiceUnavailable && response.headers[HttpHeaders.RetryAfter] != null)) {
                     metadataGate.rateLimited(response.headers[HttpHeaders.RetryAfter])
                 }
                 println("Metadata unavailable for match $matchId (HTTP ${response.status.value}).")
@@ -175,6 +178,7 @@ class DeadlockClient(
             sharedMetadataGate = MetadataRequestGate(find = find, save = save)
         }
         private fun defaultHttpClient(): HttpClient = HttpClient(CIO) {
+            install(HttpTimeout) { requestTimeoutMillis = 8_000; connectTimeoutMillis = 5_000 }
             install(ContentNegotiation) {
                 json(Json {
                     prettyPrint = true

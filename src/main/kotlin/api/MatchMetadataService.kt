@@ -22,6 +22,7 @@ class MatchMetadataService(
     private val mutex = Mutex()
     private val completed = linkedMapOf<Long, MatchDTO>()
     private val pending = linkedMapOf<Key, Retry>()
+    private val references = linkedMapOf<Long, Pair<Long, api.gc.GcMetadataDownload>>()
 
     suspend fun metadataFor(account: String, match: Long): MatchDTO? = mutex.withLock {
         require(match > 0)
@@ -32,11 +33,17 @@ class MatchMetadataService(
         if ((pending[key]?.due ?: 0) > clock()) return@withLock null
         var fetchedFrom = "API"
         val info = withTimeoutOrNull(30_000) {
-            val direct = if (gc != null) attempt("GC", match) {
-                gc.metadataDownload(account, match)?.let { download(it) }
-            } else null
-            direct?.takeIf { valid(it, match) }?.also { fetchedFrom = "Valve GC" }
-                ?: attempt("API", match) { fallback(match) }
+            // This lookup uses disable_steam=true: a cache miss must not trigger another GC fetch.
+            attempt("Stored API", match) { fallback(match) }?.takeIf { valid(it, match) }
+                ?: attempt("GC", match) {
+                    val reference = references[match]?.takeIf { clock() - it.first < 60 * 60_000L }?.second
+                        ?: gc?.metadataDownload(account, match)?.also {
+                            require(it.matchId == match) { "GC returned a reference for another match" }
+                            references[match] = clock() to it
+                            while (references.size > 256) references.remove(references.keys.first())
+                        }
+                    reference?.let { download(it) }
+                }?.takeIf { valid(it, match) }?.also { fetchedFrom = "Valve CDN" }
         }?.takeIf { valid(it, match) }
         if (info != null) {
             // Persist before announcing success; a database failure leaves the work retryable.
@@ -62,6 +69,7 @@ class MatchMetadataService(
 
     private fun remember(info: MatchDTO) {
         completed[info.matchInfo.matchId] = info
+        references.remove(info.matchInfo.matchId)
         pending.keys.removeIf { it.match == info.matchInfo.matchId }
         while (completed.size > 256) completed.remove(completed.keys.first())
     }

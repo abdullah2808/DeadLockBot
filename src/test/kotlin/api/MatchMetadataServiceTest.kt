@@ -28,7 +28,42 @@ class MatchMetadataServiceTest {
         service.retryPending(setOf("2"))
         assertEquals(match(100), service.metadataFor("2", 100))
         assertEquals(2, sends)
-        assertEquals(2, apiCalls)
+        assertEquals(3, apiCalls)
+    }
+    @Test fun `stored API match avoids GC even when Steam is rate limited`() = runTest {
+        var queries = 0
+        var downloads = 0
+        val service = MatchMetadataService(gc { _, _ -> queries++; throw GcRateLimitedException(60_000) },
+            download = { downloads++; match() }, fallback = { match(it) })
+        assertEquals(match(), service.metadataFor("1", 99))
+        assertEquals(0, queries)
+        assertEquals(0, downloads)
+    }
+
+    @Test fun `stored API cancellation propagates before GC is queried`() = runTest {
+        var queries = 0
+        val service = MatchMetadataService(gc { _, _ -> queries++; null },
+            download = { match() }, fallback = { throw CancellationException("cancelled") })
+        assertFailsWith<CancellationException> { service.metadataFor("1", 99) }
+        assertEquals(0, queries)
+    }
+
+    @Test fun `CDN retries reuse one GC reference across participants`() = runTest {
+        var queries = 0
+        var downloads = 0
+        val service = MatchMetadataService(gc { _, id -> queries++; GcMetadataDownload(id, 1, 2) },
+            download = { if (++downloads == 1) throw IOException("CDN not ready"); match(it.matchId) },
+            fallback = { null }, clock = { 0L })
+        assertNull(service.metadataFor("1", 99))
+        assertEquals(match(), service.metadataFor("2", 99))
+        assertEquals(1, queries)
+        assertEquals(2, downloads)
+    }
+
+    @Test fun `invalid stored data is ignored and GC still supplies the correct match`() = runTest {
+        val service = MatchMetadataService(gc { _, id -> GcMetadataDownload(id, 1, 2) },
+            download = { match(it.matchId) }, fallback = { match(100) })
+        assertEquals(match(), service.metadataFor("1", 99))
     }
     @Test fun `temporary persistence failure leaves enrichment pending`() = runTest {
         var now = 0L
@@ -52,7 +87,7 @@ class MatchMetadataServiceTest {
         var downloads = 0
         var saves = 0
         val service = MatchMetadataService(gc { _, id -> queries++; GcMetadataDownload(id, 1, 2) },
-            download = { downloads++; delay(100); match() }, fallback = { error("API should not be needed") }, save = { saves++ })
+            download = { downloads++; delay(100); match() }, fallback = { null }, save = { saves++ })
         val a = async { service.metadataFor("1", 99) }
         val b = async { service.metadataFor("2", 99) }
         assertEquals(match(), a.await())
@@ -109,11 +144,11 @@ class MatchMetadataServiceTest {
         val direct = MatchMetadataService(gc { _, id -> GcMetadataDownload(id, 1, 2) }, download = { match() },
             fallback = { apiCalls++; null })
         assertNotNull(direct.metadataFor("1", 99))
-        assertEquals(0, apiCalls)
+        assertEquals(1, apiCalls)
         val fallback = MatchMetadataService(gc { _, _ -> throw IOException("GC busy") }, download = { match() },
             fallback = { apiCalls++; match() })
         assertNotNull(fallback.metadataFor("1", 99))
-        assertEquals(1, apiCalls)
+        assertEquals(2, apiCalls)
     }
     @Test fun `wrong IDs and incomplete metadata are never saved`() = runTest {
         var saves = 0
@@ -122,7 +157,7 @@ class MatchMetadataServiceTest {
         assertNull(service.metadataFor("1", 99))
         assertEquals(0, saves)
     }
-    @Test fun `cancellation propagates without caching failure or calling fallback`() = runTest {
+    @Test fun `GC cancellation propagates without caching failure`() = runTest {
         var queries = 0
         var apiCalls = 0
         val service = MatchMetadataService(gc { _, id ->
@@ -131,6 +166,6 @@ class MatchMetadataServiceTest {
         }, download = { match() }, fallback = { apiCalls++; null })
         assertFailsWith<CancellationException> { service.metadataFor("1", 99) }
         assertNotNull(service.metadataFor("1", 99))
-        assertEquals(0, apiCalls)
+        assertEquals(2, apiCalls)
     }
 }
