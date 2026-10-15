@@ -63,6 +63,7 @@ class GcClient(
     private val initialRefreshToken: String?,
     private val tokenFile: File = File("steam_refresh_token.txt"),
     private val autoAcceptFriends: Boolean = true,
+    private val metadataIntervalMillis: Long = 30 * 60_000L,
 ) : MatchHistoryProvider {
     private companion object {
         const val DEADLOCK_APP_ID = 1422450
@@ -80,7 +81,9 @@ class GcClient(
     private val steamFriends = requireNotNull(steamClient.getHandler(SteamFriends::class.java))
     private val gameCoordinator = requireNotNull(steamClient.getHandler(SteamGameCoordinator::class.java))
     private val router = GcResponseRouter()
-    private val requestGate = GcRequestGate()
+    private val requestGate = GcRequestGate(mapOf(MSG_METADATA_RESPONSE to metadataIntervalMillis.also {
+        require(it >= 0) { "GC metadata interval must be nonnegative" }
+    }))
     private val friendPolicy = SteamFriendPolicy(enabled = autoAcceptFriends, accept = { account ->
         steamFriends.addFriend(SteamID(76561197960265728L + account.toLong()))
         println("Steam bot: accepting incoming friend request from $account.")

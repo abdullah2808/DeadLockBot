@@ -14,7 +14,7 @@ import javax.imageio.ImageIO
 
 /** Downloadable report with embedded assets; no web server or external scripts are required. */
 object InteractiveMatchReport {
-    private data class Event(val time: Int, val kind: String, val label: String, val item: Long? = null, val detail: String = "")
+    internal data class Event(val time: Int, val kind: String, val label: String, val item: Long? = null, val detail: String = "")
 
     fun render(match: MatchDTO, matchId: Long, assets: ScoreboardAssets, highlightedAccount: Int? = null): ByteArray {
         val info = match.matchInfo
@@ -94,7 +94,7 @@ object InteractiveMatchReport {
         return html.toByteArray(Charsets.UTF_8)
     }
 
-    private fun playerEvents(player: Players, players: List<Players>, assets: ScoreboardAssets): List<Event> {
+    internal fun playerEvents(player: Players, players: List<Players>, assets: ScoreboardAssets): List<Event> {
         val events = mutableListOf<Event>()
         val catalog = assets.catalog
         // Only unambiguous slots identify attackers; older cached rosters can default every slot to zero.
@@ -152,7 +152,7 @@ object InteractiveMatchReport {
         }
     }
 
-    private fun description(item: ItemInfo): String {
+    internal fun description(item: ItemInfo): String {
         val text = listOf("desc", "active", "passive", "quip").mapNotNull { scalar(item.description?.get(it)) }
             .map(::plainText).filter { it.isNotBlank() }.distinct()
         val properties = item.properties.orEmpty().values.mapNotNull { value ->
@@ -178,7 +178,7 @@ object InteractiveMatchReport {
         else -> null
     }
 
-    private fun tierDescription(item: ItemInfo, tier: Int): String? {
+    internal fun tierDescription(item: ItemInfo, tier: Int): String? {
         scalar(item.description?.get("t${tier}_desc"))?.takeIf { it.isNotBlank() }?.let { return plainText(it) }
         val upgrade = item.upgrades?.getOrNull(tier - 1) as? JsonObject ?: return null
         val properties = upgrade["property_upgrades"] as? kotlinx.serialization.json.JsonArray ?: return null
