@@ -31,7 +31,8 @@ class MatchMessageGeneratorTest {
         assertTrue(embed.description!!.contains("30:05"))
         assertEquals(4, embed.fields.size)
         assertTrue(embed.fields.any { it.value.contains("54,321") })
-        assertTrue(embed.fields.any { it.value.contains("/match 123456") })
+        assertTrue(embed.fields.any { it.value.contains("Open full match") && it.value.contains("`123456`") })
+        assertFalse(embed.fields.any { it.value.contains("/match ") })
         assertFalse(embed.fields.any { it.value.contains("match_id:") })
         assertFalse(embed.fields.any { it.name.contains("Damage") })
     }
@@ -75,7 +76,7 @@ class MatchMessageGeneratorTest {
         assertTrue(empty.fields.isEmpty())
         val recap = MatchMessageGenerator.buildLastFiveEmbed(List(8) { match() }, "Player", heroes)
         assertEquals(5, recap.fields.size)
-        assertTrue(recap.fields.all { it.value.contains("/match 123456") && !it.value.contains("match_id:") })
+        assertTrue(recap.fields.all { it.value.contains("Match ID: `123456`") && !it.value.contains("/match ") })
         assertTrue(recap.description!!.contains("5 W • 0 L"))
         val waiting = MatchMessageGenerator.buildLastFiveEmbed(listOf(match()), "Player", heroes,
             notice = "Waiting for match details: 999.")

@@ -116,14 +116,24 @@ object InteractiveMatchReport {
                 events += Event(timestamp, "kill", "Killed ${heroName(victim)}")
             }
         } }
-        player.items.orEmpty().forEach { item ->
+        val progression = AbilityProgression()
+        player.items.orEmpty().sortedBy { it.gameTimeSeconds }.forEach { item ->
             val definition = catalog[item.itemId]
             val name = definition?.name ?: "Unknown asset ${item.itemId}"
             val kind = when (definition?.type) { "upgrade" -> "item"; "ability" -> "ability"; else -> "unknown" }
-            val label = when (kind) { "item" -> "Bought $name"; "ability" -> "Ability point · $name"; else -> "Recorded event · $name" }
-            val detail = if (kind == "ability") {
-                item.upgradeId?.let { "Recorded ability upgrade · exact tier not inferred" } ?: "Upgrade details unavailable in this cached match"
-            } else ""
+            val tier = if (kind == "ability") progression.tier(item) else null
+            val label = when {
+                kind == "item" -> "Bought $name"
+                kind == "ability" && tier == 0 -> "Unlocked $name · Tier 0"
+                kind == "ability" && tier != null -> "Upgraded $name · Tier $tier"
+                kind == "ability" -> "Ability upgrade · $name"
+                else -> "Recorded event · $name"
+            }
+            val detail = when {
+                kind != "ability" || tier == 0 -> ""
+                tier != null -> "${AbilityProgression.cost(tier)} AP · tier inferred from recorded progression"
+                else -> "Tier unavailable: incomplete recorded progression"
+            }
             events += Event(item.gameTimeSeconds, kind, label, item.itemId, detail)
             item.soldTimeSeconds?.takeIf { it > 0 }?.let { events += Event(it, kind, "Sold $name", item.itemId) }
         }

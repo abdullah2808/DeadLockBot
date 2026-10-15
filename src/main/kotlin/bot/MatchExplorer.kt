@@ -39,7 +39,7 @@ internal object MatchExplorer {
 
     fun text(r: Report, v: View): String {
         val players = r.match.matchInfo.players
-        val p = players.getOrNull(v.player) ?: return "Player unavailable. Run `/match ${r.matchId}` again."
+        val p = players.getOrNull(v.player) ?: return "Player unavailable. Reopen this match using its notification button or `/match`."
         fun name(id: Long) = r.assets.catalog[id]?.name ?: "Asset $id"
         val hero = r.assets.heroes[p.heroId]
         val heading = "**Match ${r.matchId} · ${hero?.name ?: "Hero ${p.heroId}"} · ${v.section.replaceFirstChar { it.uppercase() }}**\n"

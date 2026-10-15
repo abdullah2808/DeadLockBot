@@ -4,7 +4,7 @@ A Kotlin Discord bot that tracks Deadlock matches and posts match recaps.
 
 ## Match commands
 
-- `/match 103328445` posts a full match scoreboard image in the current channel. Select `/match` and paste the numeric ID into its `match_id` option if your client does not accept the copied command directly.
+- `/match` with its `match_id` option set to `103328445` posts a full match scoreboard in the current channel. Select the command, press Tab to select the option on desktop, and paste only the numeric ID. Notification buttons open a report directly.
 - `/match` shows the latest match for your account linked through `/signup`.
 - `/recentmatch account_id:<id>` posts a player recap. Account IDs, SteamID64s, and numeric Steam profile URLs are accepted.
 - `/lastfive` posts the latest five matches for your linked account.
@@ -14,9 +14,11 @@ The scoreboard groups all players by team and displays heroes, K/D/A, souls, pla
 
 `/match` includes an **Explore match** button. It opens a private report with a hero/player selector and Stats, Build, Events, and Abilities views. Build offers final-item descriptions; Events offers filters and eight events per page. Each person can browse independently. Reports remain available for one hour, subject to a 50-report cache, and expire when the bot restarts; run `/match` again to reopen one. Descriptions use the current asset catalog.
 
+Match notifications include **Open full match**; last-five recaps include one button per match. These open the PNG/HTML report privately with its explorer button, without typing a command. Their match IDs survive bot restarts and explorer-cache expiry, although metadata must still be available. For manual lookup, choose `/match`, select its `match_id` option (Tab on desktop), and paste only the numeric ID. Plain pasted `/match 123456` text does not reliably populate Discord's command option.
+
 `/match` also attaches a standalone `.html` report. Download it and open it in a browser to hover/focus heroes for ability descriptions, hover/focus/tap items for descriptions and properties, select a player, and filter/scrub their purchase, sale and ability-event timeline. Images and scripts are embedded; no hosting or internet connection is needed to view the file. The PNG in Discord remains a static preview.
 
-Progression preserves recorded event order and times, including sold items. Ability events show which ability was upgraded and when, retaining raw upgrade IDs without guessing tier numbers. Events sharing a timestamp keep their original metadata order. Descriptions come from the current asset catalog, so historical patch values may differ. Older cached matches may lack progression or upgrade details; the report states when data is unavailable.
+Progression preserves recorded event order and times, including sold items. Ability unlocks display Tier 0; the next three distinct upgrades for that ability infer Tiers 1, 2, and 3, with costs of 1, 2, and 5 AP. Inference requires a recorded unlock (`upgrade_id=0`) and identifiable upgrade records; missing progression stays unknown and duplicate upgrade IDs do not advance tiers. Raw IDs are retained. Events sharing a timestamp keep their original metadata order. Descriptions come from the current asset catalog, so historical patch values may differ. Older cached matches may lack progression or upgrade details; the report states when data is unavailable.
 
 Player names are used if metadata supplies them; otherwise the scoreboard displays account IDs. Missing damage/healing stats display `—`. Hero and item images use the public Deadlock assets API, with cached images and fallbacks during outages. If full match metadata is unavailable or still processing, the command explains this instead of producing an incomplete scoreboard. Metadata cached by older bot versions may lack inventory; those rows show `Unavailable` for items.
 
