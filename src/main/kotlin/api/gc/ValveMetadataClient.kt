@@ -22,6 +22,9 @@ data class GcMetadataDownload(val matchId: Long, val clusterId: Long, val metada
     }
 }
 
+/** 403/404 usually mean Valve has not published the match file yet. */
+class ValveMetadataHttpException(val status: Int) : IOException("Valve metadata HTTP $status")
+
 class ValveMetadataClient(
     private val client: HttpClient = defaultClient(),
     private val maxDownloadBytes: Int = 8 * 1024 * 1024,
@@ -30,7 +33,7 @@ class ValveMetadataClient(
     init { require(maxDownloadBytes in 1 until Int.MAX_VALUE && maxDecodedBytes in 1 until Int.MAX_VALUE) }
     suspend fun download(reference: GcMetadataDownload): MatchDTO {
         return client.prepareGet(reference.url()).execute { response ->
-            if (!response.status.isSuccess()) throw IOException("Valve metadata HTTP ${response.status.value}")
+            if (!response.status.isSuccess()) throw ValveMetadataHttpException(response.status.value)
             val bytes = response.bodyAsChannel().readRemaining(maxDownloadBytes.toLong() + 1).readByteArray()
             if (bytes.size > maxDownloadBytes) throw IOException("Valve metadata exceeds download size limit")
             withContext(Dispatchers.Default) { decodeValveMetadata(bytes, reference.matchId, maxDecodedBytes) }

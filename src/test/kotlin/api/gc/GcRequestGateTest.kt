@@ -8,19 +8,36 @@ import java.io.IOException
 import kotlin.test.*
 
 class GcRequestGateTest {
-    @Test fun `metadata pacing spans accounts and leaves history available`() = runTest {
+    @Test fun `metadata budget spans accounts and leaves history available`() = runTest {
         var now = 0L
         var sends = 0
-        val gate = GcRequestGate(mapOf(9168 to 1_800_000L)) { now }
-        suspend fun query(type: Int, result: Int = 1) = gate.request(type, { it: Int -> it }) { sends++; result }
+        val gate = GcRequestGate(mapOf(9168 to GcMetadataBudget(limit = 2, minIntervalMillis = 20_000, reserved = 0) { now }))
+        suspend fun query(type: Int, result: Int = 1) = gate.request(type, { it: Int -> it }) { sending -> sending(); sends++; result }
         assertEquals(1, query(9168))
-        assertEquals(1_800_000L, assertFailsWith<GcRequestDeferredException> { query(9168) }.retryAfterMillis)
+        assertEquals(20_000L, assertFailsWith<GcRequestDeferredException> { query(9168) }.retryAfterMillis)
         assertEquals(1, query(9113))
         assertEquals(2, sends)
-        now = 1_800_000
+        now = 20_000
         assertEquals(2, query(9168, 2))
-        assertFailsWith<GcRequestDeferredException> { query(9168) }
+        now = 60_000
+        assertEquals(24 * 60 * 60_000L - 60_000, assertFailsWith<GcRequestDeferredException> { query(9168) }.retryAfterMillis)
         assertEquals(3, sends)
+    }
+    @Test fun `a query that never left the process does not spend the metadata budget`() = runTest {
+        val gate = GcRequestGate(mapOf(9168 to GcMetadataBudget(limit = 1, reserved = 0) { 0L }))
+        assertFailsWith<IOException> { gate.request<Int>(9168, { it }) { throw IOException("GC session not ready") } }
+        assertFailsWith<CancellationException> { gate.request<Int>(9168, { it }) { throw CancellationException() } }
+        assertEquals(1, gate.request(9168, { it: Int -> it }) { sending -> sending(); 1 })
+        assertFailsWith<GcRequestDeferredException> { gate.request(9168, { it: Int -> it }) { 1 } }
+    }
+    @Test fun `a metadata rate limit pauses the metadata budget beyond the shared cooldown`() = runTest {
+        var wall = 0L
+        val budget = GcMetadataBudget(minIntervalMillis = 0) { wall }
+        val gate = GcRequestGate(mapOf(9168 to budget)) { 0L }
+        assertEquals(60 * 60_000L, assertFailsWith<GcRateLimitedException> {
+            gate.request(9168, { it: Int -> it }) { sending -> sending(); 5 }
+        }.retryAfterMillis)
+        assertEquals(60 * 60_000L, budget.waitMillis(tracked = true))
     }
     @Test fun `cooldown blocks both endpoints without sending and permits probe at expiry`() = runTest {
         var now = 0L

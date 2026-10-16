@@ -114,6 +114,12 @@ object MatchCacheRepository {
         }
     }
 
+    /** Accounts with retained history for a match: the participants the bot can ask Valve on behalf of. */
+    fun participants(id: Long): List<String> = transaction {
+        CachedPlayerMatchTable.selectAll().where { CachedPlayerMatchTable.matchId eq id }
+            .map { it[CachedPlayerMatchTable.accountId] }
+    }
+
     fun findMetadata(id: Long): MatchDTO? = transaction {
         CachedMatchTable.selectAll().where { CachedMatchTable.matchId eq id }.singleOrNull()
             ?.get(CachedMatchTable.metadata)?.let { json.decodeFromString<MatchDTO>(it) }

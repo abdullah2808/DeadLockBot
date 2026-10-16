@@ -10,6 +10,8 @@ internal class NotificationTiming(
     private val notifyAt = mutableMapOf<FinishedMatch, Long>()
     private var nextPollAt = clock()
 
+    fun sinceDiscoveryMillis(match: FinishedMatch): Long = notifyAt[match]?.let { clock() - (it - gracePeriodMillis) } ?: 0L
+
     fun pollDue(): Boolean = clock() >= nextPollAt
     fun pollFinished() { nextPollAt = clock() + pollIntervalMillis }
     fun discovered(match: FinishedMatch) { notifyAt.putIfAbsent(match, clock() + gracePeriodMillis) }

@@ -12,6 +12,8 @@ import api.MatchMetadataService
 import api.PlayerNameService
 import api.SteamAccountResolver
 import api.gc.ValveMetadataClient
+import api.gc.GcMetadataBudget
+import data.GcQueryLog
 import data.UserRepository
 import dev.kord.core.Kord
 import dev.kord.gateway.DefaultGateway
@@ -34,7 +36,7 @@ import kotlinx.coroutines.withContext
 suspend fun main() = coroutineScope {
     DatabaseFactory.init()
     // The shared service persists GC and API results through the same participant-aware cache.
-    DeadlockClient.configureMetadataCache(MatchCacheRepository::findMetadata) {}
+    DeadlockClient.configureMetadataCache(MatchCacheRepository::findMetadata, {}, apiKey = Env.DEADLOCK_API_KEY)
     val kord = Kord(Env.DISCORD_TOKEN) {
         gateways { resources, shards ->
             val limiter = IdentifyRateLimiter(resources.maxConcurrency, defaultDispatcher)
@@ -52,9 +54,11 @@ suspend fun main() = coroutineScope {
     val apiClient = DeadlockClient()
     val valveClient = ValveMetadataClient()
     val metadata = MatchMetadataService(gcProvider, valveClient::download, apiClient::getMatchByMatchID,
+        steamFallback = if (Env.DEADLOCK_API_STEAM_FALLBACK) apiClient::getMatchFromSteam else null,
         find = MatchCacheRepository::findMetadata,
         save = { MatchCacheRepository.saveEnrichedMetadata(it, UserRepository.getAllUsers().map { user -> user.accountId }.toSet()) },
-        knownMatch = { account, match -> MatchCacheRepository.find(account, match) != null })
+        knownMatch = { account, match -> MatchCacheRepository.find(account, match) != null },
+        participants = MatchCacheRepository::participants)
     val profileResolver = SteamAccountResolver()
     val playerNames = PlayerNameService(steamName = { gcProvider?.steamPlayerName(it) }, profileName = profileResolver::playerName)
     handleCommands(kord, gcProvider, metadata, playerNames)
@@ -85,6 +89,13 @@ private fun buildGcProvider(): MatchHistoryProvider? {
         initialRefreshToken = Env.STEAM_REFRESH_TOKEN,
         tokenFile = java.io.File(Env.STEAM_TOKEN_FILE),
         autoAcceptFriends = Env.STEAM_AUTO_ACCEPT_FRIENDS,
-        metadataIntervalMillis = Env.STEAM_METADATA_INTERVAL_SECONDS * 1000,
+        metadataBudget = GcMetadataBudget(
+            limit = Env.STEAM_METADATA_DAILY_LIMIT,
+            minIntervalMillis = Env.STEAM_METADATA_INTERVAL_SECONDS * 1000,
+            load = { GcQueryLog.since(System.currentTimeMillis() - DAY_MILLIS) },
+            record = { GcQueryLog.record(it, pruneBefore = it - DAY_MILLIS) },
+        ),
     ).also { it.start() })
 }
+
+private const val DAY_MILLIS = 24 * 60 * 60_000L

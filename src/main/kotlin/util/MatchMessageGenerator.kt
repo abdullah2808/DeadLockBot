@@ -1,7 +1,10 @@
 package util
 
 import dev.kord.common.Color
+import dev.kord.core.behavior.MessageBehavior
 import dev.kord.core.behavior.channel.createMessage
+import dev.kord.core.behavior.edit
+import dev.kord.core.entity.Message
 import dev.kord.core.entity.channel.TextChannel
 import dev.kord.rest.builder.message.EmbedBuilder
 import models.HeroInfo
@@ -160,8 +163,14 @@ object MatchMessageGenerator {
         userName: String?,
         channel: TextChannel?,
         additionalMatchInfo: MatchDTO?
-    ) {
-        channel?.createMessage {
+    ): Message? = channel?.createMessage {
+        embeds = mutableListOf(buildRecentMatchEmbed(match, userName, additionalMatchInfo))
+        matchReportButtons(listOf(match.matchId))
+    }
+
+    /** Replace a basic notification with the enriched one once full metadata arrives. */
+    suspend fun updateRecentMatch(message: MessageBehavior, match: MatchHistoryDTO, userName: String?, additionalMatchInfo: MatchDTO) {
+        message.edit {
             embeds = mutableListOf(buildRecentMatchEmbed(match, userName, additionalMatchInfo))
             matchReportButtons(listOf(match.matchId))
         }
