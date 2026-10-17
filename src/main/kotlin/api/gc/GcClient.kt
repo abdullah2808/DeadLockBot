@@ -1,6 +1,7 @@
 package api.gc
 
 import com.google.protobuf.Message
+import gc.citadel.CitadelLive
 import gc.citadel.CitadelMatchHistory
 import `in`.dragonbra.javasteam.base.ClientMsgProtobuf
 import `in`.dragonbra.javasteam.base.gc.ClientGCMsgProtobuf
@@ -31,12 +32,14 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
+import models.ActiveMatchDTO
 import models.MatchHistoryDTO
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermissions
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 
 interface MatchHistoryProvider {
@@ -48,6 +51,12 @@ interface MatchHistoryProvider {
      * [tracked] lookups (a registered player's match) may use the budget's reserved share.
      */
     suspend fun metadataDownload(targetAccountId: String?, matchId: Long, tracked: Boolean = true): GcMetadataDownload? = null
+    /** The in-game profile card (rank, featured heroes, headline stats); null when no GC session is configured. */
+    suspend fun profileCard(accountId: String): ProfileCard? = null
+    /** The in-game Watch tab's live matches; null when no GC session is configured. */
+    suspend fun activeMatches(): List<ActiveMatchDTO>? = null
+    /** Whether a Steam friend of the bot is currently in Deadlock; null when the bot can't see their presence. */
+    fun playingDeadlock(accountId: String): Boolean? = null
     fun steamBotIdentity(): SteamBotIdentity? = null
     fun steamPlayerName(accountId: String): String? = null
     fun friendship(accountId: String): SteamFriendship = SteamFriendship.UNKNOWN
@@ -82,6 +91,12 @@ class GcClient(
         const val MSG_HISTORY_RESPONSE = 9113
         const val MSG_GET_METADATA = 9167
         const val MSG_METADATA_RESPONSE = 9168
+        const val MSG_GET_PROFILE_CARD = 9024
+        const val MSG_PROFILE_CARD_RESPONSE = 9025
+        const val MSG_GET_ACTIVE_MATCHES = 9203
+        const val MSG_ACTIVE_MATCHES_RESPONSE = 9204
+        /** After an optional request goes unanswered, use fallbacks instead of reconnecting the shared session again. */
+        const val UNANSWERED_COOLDOWN_MS = 30 * 60_000L
         const val REQUEST_TIMEOUT_MS = 20_000L
     }
     private val steamClient = SteamClient()
@@ -101,6 +116,7 @@ class GcClient(
     @Volatile private var welcome = CompletableDeferred<Unit>()
     @Volatile private var identity: SteamBotIdentity? = null
     @Volatile private var reconnectRequested = false
+    private val unansweredUntil = ConcurrentHashMap<Int, Long>()
 
     fun start() {
         running = true
@@ -141,6 +157,10 @@ class GcClient(
         return steamFriends.getFriendPersonaName(SteamID(76561197960265728L + accountId.toLong()))
     }
     override fun friendship(accountId: String) = friendPolicy.status(accountId)
+    override fun playingDeadlock(accountId: String): Boolean? {
+        if (!connected || friendPolicy.status(accountId) != SteamFriendship.FRIEND) return null
+        return steamFriends.getFriendGamePlayed(SteamID(76561197960265728L + accountId.toLong()))?.appID == DEADLOCK_APP_ID
+    }
     override fun autoAcceptFriendsEnabled() = autoAcceptFriends
     override fun authorizeSignupFriendRequest(accountId: String) = friendPolicy.authorizeSignup(accountId)
     override fun updateTrackedAccounts(accounts: Set<String>) = friendPolicy.updateTracked(accounts)
@@ -178,12 +198,52 @@ class GcClient(
         return metadataReference(matchId, body)
     }
 
+    override suspend fun profileCard(accountId: String): ProfileCard {
+        val body = optionalRequest(MSG_PROFILE_CARD_RESPONSE) { job ->
+            val message = ClientGCMsgProtobuf<CitadelLive.CMsgClientToGCGetProfileCard.Builder>(
+                CitadelLive.CMsgClientToGCGetProfileCard::class.java, MSG_GET_PROFILE_CARD)
+            message.sourceJobID = job
+            message.body.accountId = accountId.toLong().toInt()
+            message.body.friendAccessHint = friendPolicy.status(accountId) == SteamFriendship.FRIEND
+            gameCoordinator.send(message, DEADLOCK_APP_ID)
+        } as CitadelLive.CMsgCitadelProfileCard
+        return body.toProfileCard(accountId)
+    }
+
+    override suspend fun activeMatches(): List<ActiveMatchDTO> {
+        val body = optionalRequest(MSG_ACTIVE_MATCHES_RESPONSE) { job ->
+            val message = ClientGCMsgProtobuf<CitadelLive.CMsgClientToGCGetActiveMatches.Builder>(
+                CitadelLive.CMsgClientToGCGetActiveMatches::class.java, MSG_GET_ACTIVE_MATCHES)
+            message.sourceJobID = job
+            gameCoordinator.send(message, DEADLOCK_APP_ID)
+        } as CitadelLive.CMsgClientToGCGetActiveMatchesResponse
+        println("GC active matches: ${body.activeMatchesCount} live matches.")
+        return body.activeMatchesList.map { it.toActiveMatch() }
+    }
+
+    /** Requests Valve may silently ignore; one unanswered query pauses them so callers use their fallbacks. */
+    private suspend fun optionalRequest(responseType: Int, send: (JobID) -> Unit): Message {
+        unansweredUntil[responseType]?.let { until ->
+            if (System.currentTimeMillis() < until) throw IOException("GC did not answer a recent $responseType request")
+        }
+        var sent = false
+        try {
+            return request(responseType) { job -> sent = true; send(job) }
+        } catch (e: IOException) {
+            // A session that never became ready is not Valve ignoring the request.
+            if (sent && e.cause is TimeoutCancellationException) unansweredUntil[responseType] = System.currentTimeMillis() + UNANSWERED_COOLDOWN_MS
+            throw e
+        }
+    }
+
     private suspend fun request(responseType: Int, tracked: Boolean = true, send: (JobID) -> Unit): Message = requestGate.request<Message>(
         responseType,
         tracked = tracked,
         result = { response -> when (response) {
             is CitadelMatchHistory.CMsgClientToGCGetMatchHistoryResponse -> response.result.number
             is CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse -> response.result.number
+            // Neither carries a result code; an answer is a success.
+            is CitadelLive.CMsgCitadelProfileCard, is CitadelLive.CMsgClientToGCGetActiveMatchesResponse -> 1
             else -> error("Unexpected GC response: ${response.javaClass.simpleName}")
         } },
     ) { sending ->
@@ -300,6 +360,17 @@ class GcClient(
                         CitadelMatchHistory.CMsgClientToGCGetMatchMetaDataResponse::class.java, callback.message)
                     router.complete(MSG_METADATA_RESPONSE, response.targetJobID.value, response.body.build())
                 }
+                MSG_PROFILE_CARD_RESPONSE -> {
+                    val response = ClientGCMsgProtobuf<CitadelLive.CMsgCitadelProfileCard.Builder>(
+                        CitadelLive.CMsgCitadelProfileCard::class.java, callback.message)
+                    router.complete(MSG_PROFILE_CARD_RESPONSE, response.targetJobID.value, response.body.build())
+                }
+                MSG_ACTIVE_MATCHES_RESPONSE -> {
+                    // Decoded from the raw body: it may be compressed, which the typed wrapper can't parse.
+                    val message = callback.message
+                    router.complete(MSG_ACTIVE_MATCHES_RESPONSE, message.targetJobID.value,
+                        decodeActiveMatches(gcProtobufBody(message.data)))
+                }
             }
         } catch (e: Exception) { router.fail(IOException("Could not decode GC response", e)) }
     }
@@ -318,6 +389,14 @@ internal fun metadataReference(matchId: Long, body: CitadelMatchHistory.CMsgClie
     if (!body.hasMetadataSalt() || body.metadataSalt == 0 || !body.hasReplayGroupId() || body.replayGroupId == 0)
         throw GcMetadataException(matchId, GcMetadataFailure.NOT_READY, "download references are not ready")
     return GcMetadataDownload(matchId, body.replayGroupId.toUInt().toLong(), body.metadataSalt.toUInt().toLong())
+}
+
+/** A protobuf GC packet is `msg type (4) | header length (4) | header | body`, all little-endian. */
+internal fun gcProtobufBody(packet: ByteArray): ByteArray {
+    if (packet.size < 8) throw IOException("GC packet too short")
+    val headerLength = java.nio.ByteBuffer.wrap(packet, 4, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).int
+    if (headerLength < 0 || headerLength > packet.size - 8) throw IOException("Invalid GC header length $headerLength")
+    return packet.copyOfRange(8 + headerLength, packet.size)
 }
 
 /** Write privately, then replace the old token only after a complete write. */
