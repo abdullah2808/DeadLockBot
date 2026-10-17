@@ -1,0 +1,78 @@
+syntax = "proto2";
+
+option java_package = "gc.citadel";
+option java_outer_classname = "CitadelLive";
+
+// Minimal subset of Deadlock's citadel_gcmessages_client.proto for profile cards
+// and the in-game Watch tab's active-match list. Field numbers match the real
+// protobufs (SteamDatabase/GameTracking-Deadlock). As in citadel_matchhistory.proto,
+// Deadlock enums are modelled as int32, which is wire-compatible.
+//
+// GC message ids (from EGCCitadelClientMessages):
+//   k_EMsgClientToGCGetProfileCard           = 9024
+//   k_EMsgClientToGCGetProfileCardResponse   = 9025 (body: CMsgCitadelProfileCard)
+//   k_EMsgClientToGCGetActiveMatches         = 9203
+//   k_EMsgClientToGCGetActiveMatchesResponse = 9204
+
+message CMsgClientToGCGetProfileCard {
+    optional uint32 account_id = 1;
+    optional bool dev_access_hint = 2;
+    optional bool friend_access_hint = 3;
+}
+
+message CMsgCitadelProfileCard {
+    message Slot {
+        message Stat {
+            optional int32 stat_id = 1; // EStatID: wins=1, kills=2, games played=3
+            optional uint32 stat_score = 2;
+        }
+
+        message Hero {
+            optional uint32 hero_id = 1;
+            optional uint32 hero_wins = 2;
+            optional uint32 hero_kills = 3;
+        }
+
+        optional uint32 slot_id = 1;
+        optional Stat stat = 2;
+        optional Hero hero = 3;
+    }
+
+    optional uint32 account_id = 1;
+    repeated Slot slots = 2;
+    optional uint32 ranked_badge_level = 3; // tier * 10 + subrank
+}
+
+message CMsgClientToGCGetActiveMatches {
+}
+
+message CMsgClientToGCGetActiveMatchesResponse {
+    repeated CMsgDevMatchInfo active_matches = 1;
+}
+
+message CMsgDevMatchInfo {
+    message MatchPlayer {
+        optional uint32 account_id = 1;
+        optional int32 team = 2; // ECitadelLobbyTeam
+        optional bool abandoned = 3;
+        optional uint32 hero_id = 4;
+    }
+
+    optional uint32 start_time = 1;
+    optional int32 winning_team = 2;
+    optional uint64 match_id = 3;
+    repeated MatchPlayer players = 4;
+    optional fixed64 lobby_id = 5;
+    optional uint32 game_mode_version = 6;
+    optional uint32 net_worth_team_0 = 9;
+    optional uint32 net_worth_team_1 = 10;
+    optional uint32 duration_s = 11;
+    optional uint32 spectators = 12;
+    optional uint32 open_spectator_slots = 13;
+    optional uint64 objectives_mask_team0 = 14;
+    optional uint64 objectives_mask_team1 = 15;
+    optional int32 match_mode = 16; // ECitadelMatchMode
+    optional int32 game_mode = 17;  // ECitadelGameMode
+    optional uint32 match_score = 18;
+    optional int32 region_mode = 19;
+}

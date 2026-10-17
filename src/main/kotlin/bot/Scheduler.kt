@@ -13,6 +13,12 @@ import dev.kord.core.entity.channel.TextChannel
 import dev.kord.rest.request.RestRequestException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import dev.kord.core.behavior.channel.createMessage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import models.RankRepository
+import util.LiveMessageGenerator
+import util.MatchModes
 import models.MatchDTO
 import models.MatchHistoryDTO
 import models.toMatchHistory
@@ -46,6 +52,8 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
     // Poll every 90 seconds. Metadata is fetched from discovery on; a notification posts as soon as it
     // arrives, or with the basic summary after 60 seconds and is edited once metadata arrives.
     val timing = NotificationTiming()
+    // Rank changes come from GC profile cards, so they are only watched when a Steam session exists.
+    val ranks = gcProvider?.let { gc -> RankTracker({ gc.profileCard(it) }) }
 
     try {
         while (true) {
@@ -123,6 +131,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                         println("Posted match ${finished.matchId} for ${finished.accountId} " +
                             "${if (metadata != null) "with" else "without"} full metadata, ${timing.sinceDiscoveryMillis(finished) / 1000}s after discovery.")
                         timing.forget(finished)
+                        if (MatchModes.affectsRank(match.gameMode, match.matchMode)) ranks?.rankedMatchFinished(finished.accountId)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -160,6 +169,10 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                     },
                     remove = { MatchNotificationRepository.remove(it.accountId, it.matchId) },
                 )
+                ranks?.checkDue(usersByAccount.keys)?.forEach { (account, change) ->
+                    val user = usersByAccount[account] ?: return@forEach
+                    announceRankChange(kord, user.channelId, user.discordUser, change)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -180,6 +193,21 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
 
 private const val ENRICHMENT_WINDOW_MILLIS = 24 * 60 * 60_000L
 private const val MIN_WAKE_MILLIS = 5_000L
+
+/** Best effort: the new badge is already recorded, so a failed post is not retried (and never repeated). */
+private suspend fun announceRankChange(kord: Kord, channelId: String?, playerName: String, change: RankChange) {
+    try {
+        val channel = channelId?.let { kord.getChannelOf<TextChannel>(Snowflake(it)) } ?: return
+        val (previous, current) = withContext(Dispatchers.IO) {
+            change.previous?.let(RankRepository::describeBadge) to RankRepository.describeBadge(change.current)
+        }
+        channel.createMessage { embeds = mutableListOf(LiveMessageGenerator.rankChangeEmbed(playerName, change, previous, current)) }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        println("Could not announce rank change for $playerName: ${e.message}")
+    }
+}
 
 /** A failure to remember a notification must never fail (and so duplicate) its delivery. */
 private fun awaitMetadata(notification: PostedNotification) {
