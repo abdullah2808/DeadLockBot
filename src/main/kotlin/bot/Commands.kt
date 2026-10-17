@@ -10,6 +10,10 @@ import api.MatchMetadataService
 import api.MetadataLookup
 import api.MetadataUnavailableReason
 import api.PlayerNameService
+import api.LiveMatchService
+import api.gc.GcRateLimitedException
+import models.RankRepository
+import util.LiveMessageGenerator
 import api.asDiscordTitleText
 import kotlinx.coroutines.CancellationException
 import dev.kord.rest.builder.component.actionRow
@@ -49,6 +53,12 @@ suspend fun registerCommands(kord: Kord) {
         input("match", "Show a full Deadlock match scoreboard") {
             string("match_id", "Match ID (leave blank for your latest tracked match)")
         }
+        input("profile", "Show a Deadlock profile card: rank, featured heroes and stats") {
+            string("account_id", "Account ID, SteamID64, or Steam profile URL (leave blank for yours)")
+        }
+        input("live", "Check whether a player is in a live Deadlock match") {
+            string("account_id", "Account ID, SteamID64, or Steam profile URL (leave blank for yours)")
+        }
     }
 
     // Legacy commands in this server shadow the application's global commands.
@@ -69,7 +79,8 @@ suspend fun registerCommands(kord: Kord) {
 }
 
 suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null, metadata: MatchMetadataService? = null,
-                           playerNames: PlayerNameService = PlayerNameService()) {
+                           playerNames: PlayerNameService = PlayerNameService(),
+                           live: LiveMatchService = LiveMatchService(gcProvider, null)) {
     registerMatchExplorer(kord)
     kord.on<ComponentInteractionCreateEvent> {
         if (!interaction.componentId.startsWith("match-report:")) return@on
@@ -96,6 +107,8 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
             "recentmatch" -> handleRecentMatch(interaction, kord, gcProvider, metadata, playerNames)
             "lastfive" -> handleLastFive(interaction, kord, gcProvider, metadata)
             "match" -> handleMatch(interaction, gcProvider, metadata, interaction.command.strings["match_id"])
+            "profile" -> handleProfile(interaction, gcProvider, live, playerNames)
+            "live" -> handleLive(interaction, gcProvider, live, playerNames)
         }
     }
 }
@@ -195,6 +208,78 @@ private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, 
     } finally {
         client.close()
     }
+}
+
+/** The account named in the optional `account_id`, else the caller's linked account. */
+private suspend fun requestedOrLinkedAccount(interaction: ChatInputCommandInteraction, onError: suspend (String) -> Unit): String? {
+    interaction.command.strings["account_id"]?.let { return resolveAccountInput(it, onError) }
+    return UserRepository.selectUserByDiscordID(interaction.user.id.toString())?.accountId
+        ?: run { onError("Provide an `account_id`, or use `/signup` to link your account."); null }
+}
+
+private suspend fun handleProfile(interaction: ChatInputCommandInteraction, gc: MatchHistoryProvider?,
+                                  live: LiveMatchService, playerNames: PlayerNameService) {
+    val response = interaction.deferPublicResponse()
+    val accountId = requestedOrLinkedAccount(interaction) { message -> response.respond { content = message } } ?: return
+    if (gc == null) {
+        response.respond { content = "Profile cards come from Valve's Game Coordinator, which needs the Steam bot; it isn't configured on this deployment." }
+        return
+    }
+    try {
+        val card = live.profileCard(accountId)
+        if (card == null) {
+            response.respond { content = "I couldn't load the profile card for `$accountId` right now. Please try again shortly." }
+            return
+        }
+        val rank = card.rankedBadgeLevel?.let { badge -> withContext(Dispatchers.IO) { RankRepository.describeBadge(badge) } }
+        val name = playerNames.nameFor(accountId).asDiscordTitleText()
+        response.respond { embeds = mutableListOf(LiveMessageGenerator.profileEmbed(name, card, rank)) }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: GcRateLimitedException) {
+        response.respond { content = "Valve is rate limiting the bot. ${e.message}." }
+    } catch (e: Exception) {
+        println("Profile command failed for $accountId: ${e.message}")
+        response.respond { content = "I couldn't load the profile card for `$accountId` right now. Please try again shortly." }
+    }
+}
+
+private suspend fun handleLive(interaction: ChatInputCommandInteraction, gc: MatchHistoryProvider?,
+                               live: LiveMatchService, playerNames: PlayerNameService) {
+    val response = interaction.deferPublicResponse()
+    val accountId = requestedOrLinkedAccount(interaction) { message -> response.respond { content = message } } ?: return
+    val name = playerNames.nameFor(accountId).asDiscordTitleText()
+    val inGame = gc?.playingDeadlock(accountId)
+    val match = try {
+        live.findLive(accountId.toLong())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        println("Live command could not load active matches: ${e.message}")
+        response.respond { content = liveUnavailableMessage(name, inGame) }
+        return
+    }
+    if (match == null) {
+        response.respond { content = notLiveMessage(name, inGame) }
+        return
+    }
+    val trackedNames = UserRepository.getAllUsers()
+        .mapNotNull { user -> user.accountId.toLongOrNull()?.let { it to user.discordUser.asDiscordTitleText() } }
+        .filter { (id, _) -> match.players.any { it.accountId == id } }
+        .toMap()
+    response.respond { embeds = mutableListOf(LiveMessageGenerator.liveEmbed(name, accountId.toLong(), match, trackedNames)) }
+}
+
+internal fun liveUnavailableMessage(name: String, inGame: Boolean?) =
+    if (inGame == true) "🟢 $name is in Deadlock right now, but Valve's live match list is unavailable. Try again shortly."
+    else "I couldn't reach the live match list right now. Please try again shortly."
+
+/** Valve's Watch list only features a subset of games, so absence from it is not proof of being offline. */
+internal fun notLiveMessage(name: String, inGame: Boolean?) = when (inGame) {
+    true -> "🟢 $name is in Deadlock, but their match isn't in Valve's Watch list, which only features a subset of live games."
+    false -> "⚫ $name isn't playing Deadlock right now."
+    null -> "$name isn't in any match on Valve's Watch list, which only features a subset of live games. " +
+        "Players who are Steam friends with the bot (`/steambot`) also show whether they're in game."
 }
 
 private suspend fun resolveAccountInput(raw: String, onError: suspend (String) -> Unit): String? {

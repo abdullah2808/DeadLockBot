@@ -20,6 +20,10 @@ data class Rank(
     val images: RankImages? = null
 )
 
+data class RankBadge(val name: String, val subrank: Int, val image: String?) {
+    val label get() = if (subrank in 1..6) "$name $subrank" else name
+}
+
 object RankRepository {
     private val catalog = AssetCatalog(load = {
         assetJson.decodeFromString<List<Rank>>(readAssetCatalog("ranks")).associateBy { it.tier }
@@ -34,6 +38,14 @@ object RankRepository {
         }
         val rank = catalog.get(avgTeamRank / 10) ?: return null
         return rankImageForBadge(avgTeamRank, listOf(rank))
+    }
+
+    /** Name, subrank and image for a packed badge (tier * 10 + subrank); null when the tier is unknown. */
+    fun describeBadge(badge: Int): RankBadge? = catalog.get(badge / 10)?.let { describeBadge(badge, listOf(it)) }
+
+    fun describeBadge(badge: Int, ranks: List<Rank>): RankBadge? {
+        val rank = ranks.firstOrNull { it.tier == badge / 10 } ?: return null
+        return RankBadge(rank.name, badge % 10, rankImageForBadge(badge, ranks))
     }
 
     // Pure and bounds-safe so it can be unit tested without a network call, and so an

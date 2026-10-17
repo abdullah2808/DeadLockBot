@@ -10,6 +10,7 @@ import data.MatchCacheRepository
 import api.DeadlockClient
 import api.MatchMetadataService
 import api.PlayerNameService
+import api.LiveMatchService
 import api.SteamAccountResolver
 import api.gc.ValveMetadataClient
 import api.gc.GcMetadataBudget
@@ -61,7 +62,8 @@ suspend fun main() = coroutineScope {
         participants = MatchCacheRepository::participants)
     val profileResolver = SteamAccountResolver()
     val playerNames = PlayerNameService(steamName = { gcProvider?.steamPlayerName(it) }, profileName = profileResolver::playerName)
-    handleCommands(kord, gcProvider, metadata, playerNames)
+    val live = LiveMatchService(gcProvider, apiClient::getActiveMatches)
+    handleCommands(kord, gcProvider, metadata, playerNames, live)
     val scheduler = launch { startScheduler(kord, gcProvider, metadata) }
     try {
         kord.login { presence { playing("tracking Deadlock matches") } }

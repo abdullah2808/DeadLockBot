@@ -17,7 +17,7 @@ object DatabaseFactory {
                 password = Env.DB_PASSWORD
         )
         transaction {
-            SchemaUtils.create(UserTable, CachedMatchTable, CachedPlayerMatchTable, GcQueryTable, MatchNotificationTable)
+            SchemaUtils.create(UserTable, CachedMatchTable, CachedPlayerMatchTable, GcQueryTable, MatchNotificationTable, RankSnapshotTable)
         }
     }
 }

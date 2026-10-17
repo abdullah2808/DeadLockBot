@@ -12,6 +12,7 @@ data class ActiveMatchPlayer(
     @SerialName("account_id") val accountId: Long,
     @SerialName("team") val team: Int = 0,
     @SerialName("hero_id") val heroId: Int = 0,
+    @SerialName("abandoned") val abandoned: Boolean = false,
 )
 
 /**
@@ -25,4 +26,10 @@ data class ActiveMatchDTO(
     @SerialName("match_id") val matchId: Long,
     @SerialName("start_time") val startTime: Long = 0,
     @SerialName("players") val players: List<ActiveMatchPlayer> = emptyList(),
+    @SerialName("duration_s") val durationS: Long = 0,
+    @SerialName("spectators") val spectators: Long = 0,
+    @SerialName("net_worth_team_0") val netWorthTeam0: Long = 0,
+    @SerialName("net_worth_team_1") val netWorthTeam1: Long = 0,
+    @SerialName("game_mode") val gameMode: Int = 0,
+    @SerialName("match_mode") val matchMode: Int = 0,
 )
