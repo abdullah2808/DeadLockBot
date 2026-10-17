@@ -7,6 +7,7 @@ import models.MatchInfoDTO
 import models.Players
 import models.Stats
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -81,5 +82,15 @@ class MatchMessageGeneratorTest {
         val waiting = MatchMessageGenerator.buildLastFiveEmbed(listOf(match()), "Player", heroes,
             notice = "Waiting for match details: 999.")
         assertTrue(waiting.description!!.startsWith("Waiting for match details: 999."))
+    }
+
+    @Test
+    fun `notifications and last five show the match mode`() {
+        val ranked = match().copy(matchMode = 4)
+        assertContains(MatchMessageGenerator.buildRecentMatchEmbed(ranked, "P", null, { HeroInfo("Haze", null) }, { _, _ -> null }).description!!, "🏅 Ranked")
+        val brawl = match().copy(gameMode = 4, matchId = 2)
+        val lastFive = MatchMessageGenerator.buildLastFiveEmbed(listOf(ranked, brawl), "P", { HeroInfo("Haze", null) })
+        assertContains(lastFive.fields[0].name, "🏅 Ranked")
+        assertContains(lastFive.fields[1].name, "🥊 Street Brawl")
     }
 }

@@ -1,6 +1,7 @@
 package util
 
 import api.gc.ProfileCard
+import bot.RankChange
 import dev.kord.common.Color
 import dev.kord.rest.builder.message.EmbedBuilder
 import models.ActiveMatchDTO
@@ -67,7 +68,7 @@ object LiveMessageGenerator {
         description = buildString {
             player?.let { appendLine("Playing **${heroName(it.heroId)}** for **${teamName(it.team)}**") }
             val details = listOfNotNull(
-                modeLabel(match.gameMode, match.matchMode),
+                MatchModes.label(match.gameMode, match.matchMode),
                 elapsedSeconds(match, nowEpochSeconds)?.let { "⏱ ${formatDuration(it)}" },
                 match.spectators.takeIf { it > 0 }?.let { "👁 ${it.formatted()} watching" },
             )
@@ -95,27 +96,33 @@ object LiveMessageGenerator {
         footer { text = "Use /match ${match.matchId} once the match ends for the full scoreboard." }
     }
 
+    fun rankChangeEmbed(playerName: String, change: RankChange, previous: RankBadge?, current: RankBadge?) = EmbedBuilder().apply {
+        val name = playerName.take(180)
+        val currentLabel = current?.label ?: "Badge ${change.current}"
+        val previousLabel = previous?.label ?: change.previous?.let { "Badge $it" }
+        when (change.direction) {
+            RankChange.Direction.UP -> {
+                title = "📈 $name ranked up!"
+                color = Color(0x2ECC71)
+            }
+            RankChange.Direction.DOWN -> {
+                title = "📉 $name's rank changed"
+                color = Color(0x95A5A6)
+            }
+            RankChange.Direction.PLACED -> {
+                title = "🎖️ $name earned a rank!"
+                color = Color(0xF1C40F)
+            }
+        }
+        description = previousLabel?.let { "$it → **$currentLabel**" } ?: "Now **$currentLabel**"
+        current?.image?.let { thumbnail { url = it } }
+        footer { text = "Deadlock rank · from the player's profile card" }
+    }
+
     internal fun teamName(team: Int) = when (team) {
         0 -> "Amber"
         1 -> "Sapphire"
         else -> "Spectators"
-    }
-
-    internal fun modeLabel(gameMode: Int, matchMode: Int): String? {
-        val match = when (matchMode) {
-            1 -> "Unranked"
-            2 -> "Private lobby"
-            3 -> "Bot match"
-            4 -> "Ranked"
-            7 -> "Hero Labs"
-            8 -> "Placement"
-            else -> null
-        }
-        val game = when (gameMode) {
-            4 -> "Street Brawl"
-            else -> null
-        }
-        return listOfNotNull(game, match).joinToString(" ").ifBlank { null }
     }
 
     /** The GC's duration lags; derive it from the start time when that is available. */

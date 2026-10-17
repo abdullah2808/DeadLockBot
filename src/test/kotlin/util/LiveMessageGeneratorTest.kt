@@ -44,7 +44,7 @@ class LiveMessageGeneratorTest {
         assertContains(embed.title!!, "Match 55")
         val description = embed.description!!
         assertContains(description, "Playing **Hero7** for **Amber**")
-        assertContains(description, "Ranked · ⏱ 12:05 · 👁 3 watching")
+        assertContains(description, "🏅 Ranked · ⏱ 12:05 · 👁 3 watching")
         assertContains(description, "(Sapphire +6,500)")
         assertEquals(listOf("Amber", "Sapphire"), embed.fields.map { it.name })
         assertContains(embed.fields[0].value, "Hero8 (left)")
@@ -55,7 +55,19 @@ class LiveMessageGeneratorTest {
     fun `elapsed time falls back to the reported duration`() {
         assertEquals(90, LiveMessageGenerator.elapsedSeconds(ActiveMatchDTO(matchId = 1, durationS = 90), 5_000))
         assertNull(LiveMessageGenerator.elapsedSeconds(ActiveMatchDTO(matchId = 1), 5_000))
-        assertEquals("Street Brawl Unranked", LiveMessageGenerator.modeLabel(4, 1))
-        assertNull(LiveMessageGenerator.modeLabel(1, 0))
+    }
+
+    @Test
+    fun `rank change embeds describe ups, downs and placements`() {
+        val ranks = listOf(Rank(5, "Arcanist", RankImages(smallSubRankFour = "https://img/a4.png", smallSubRankFive = "https://img/a5.png")))
+        val up = LiveMessageGenerator.rankChangeEmbed("Player", bot.RankChange(54, 55),
+            RankRepository.describeBadge(54, ranks), RankRepository.describeBadge(55, ranks))
+        assertEquals("📈 Player ranked up!", up.title)
+        assertEquals("Arcanist 4 → **Arcanist 5**", up.description)
+        assertEquals("https://img/a5.png", up.thumbnail?.url)
+        val down = LiveMessageGenerator.rankChangeEmbed("Player", bot.RankChange(55, 54), null, null)
+        assertEquals("Badge 55 → **Badge 54**", down.description)
+        val placed = LiveMessageGenerator.rankChangeEmbed("Player", bot.RankChange(null, 54), null, RankRepository.describeBadge(54, ranks))
+        assertEquals("Now **Arcanist 4**", placed.description)
     }
 }

@@ -105,7 +105,8 @@ object MatchMessageGenerator {
         return EmbedBuilder().apply {
             title = "$outcome • ${(userName ?: "Player").take(180)}"
             description = "**${hero.name}** • Level ${match.heroLevel}\n" +
-                "🕒 **${duration(match)}** • <t:${match.startTime}:R>"
+                listOfNotNull(MatchModes.label(match.gameMode, match.matchMode), "🕒 **${duration(match)}**", "<t:${match.startTime}:R>")
+                    .joinToString(" • ")
             color = when {
                 match.matchResult !in 0..1 || match.playerTeam !in 0..1 -> Color(0x95A5A6)
                 match.matchResult == match.playerTeam -> Color(0xE5B454)
@@ -197,7 +198,8 @@ object MatchMessageGenerator {
             notice?.let { description = "$it\n\n$description" }
             recent.forEach { match ->
                 field {
-                    name = "${result(match)} • ${heroLookup(match.heroId).name}"
+                    name = listOfNotNull(result(match), heroLookup(match.heroId).name, MatchModes.label(match.gameMode, match.matchMode))
+                        .joinToString(" • ")
                     value = "**${match.kills} / ${match.deaths} / ${match.assists}** K/D/A • " +
                         "💰 **${number(match.netWorth)}** souls • 🕒 ${duration(match)}\n" +
                         "<t:${match.startTime}:R> • Match ID: `${match.matchId}`"
