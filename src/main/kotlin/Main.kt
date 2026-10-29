@@ -97,7 +97,10 @@ private fun buildGcProvider(): MatchHistoryProvider? {
             load = { GcQueryLog.since(System.currentTimeMillis() - DAY_MILLIS) },
             record = { GcQueryLog.record(it, pruneBefore = it - DAY_MILLIS) },
         ),
-    ).also { it.start() })
+    ).also { it.start() }, save = { account, matches ->
+        MatchCacheRepository.save(account, matches)
+        data.WeeklyDigestRepository.record(account, matches)
+    })
 }
 
 private const val DAY_MILLIS = 24 * 60 * 60_000L
