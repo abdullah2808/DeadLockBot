@@ -27,7 +27,7 @@ object InteractiveMatchReport {
         val html = buildString {
             append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
             append("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'\">")
-            append("<title>Deadlock match $matchId</title><style>$css")
+            append("<title>Deadlock match $matchId</title><style>$css .simulator-link{display:inline-block;color:#e0bb67;border:1px solid #a88a46;padding:10px 14px;border-radius:4px;text-decoration:none}.simulator-link:hover,.simulator-link:focus{background:#45391d}")
             // Embed each icon once, rather than repeating a data URI for every event.
             icons.forEach { (id, uri) -> append(".icon-$id{background-image:url('$uri');background-size:contain;background-position:center;background-repeat:no-repeat}") }
             append(".asset-icon{display:block;width:100%;height:100%;border-radius:4px}</style></head><body>")
@@ -77,6 +77,9 @@ object InteractiveMatchReport {
             append("</select></label></div><div class=\"controls\"><label>Show events through <output id=\"clock\">${time(duration)}</output><input id=\"time\" aria-label=\"Timeline cutoff\" type=\"range\" min=\"0\" max=\"$duration\" value=\"$duration\"></label><label>Events<select id=\"kind\" aria-label=\"Events\"><option value=\"all\">All events</option><option value=\"item\">Item purchases &amp; sales</option><option value=\"ability\">Ability progression</option><option value=\"combat\">Kills &amp; deaths</option><option value=\"kill\">Kills only</option><option value=\"death\">Deaths only</option></select></label></div>")
             players.forEachIndexed { index, player ->
                 append("<article class=\"player-build\" data-build=\"$index\" ${if (index == 0) "" else "hidden"}><h3>${escape(assets.heroes[player.heroId]?.name ?: "Hero ${player.heroId}")}</h3>")
+                val simulator = SoulLedgerExport.url(player, matchId, assets.catalog)
+                if (simulator != null) append("<p><a class=\"simulator-link\" href=\"${escape(simulator)}\" target=\"_blank\" rel=\"noopener noreferrer\">Open final build in Soul Ledger</a></p><p class=\"data-notice\">Imports hero and final inventory only. Simulator costs, levels, ability choices and stats are not observed match values.</p>")
+                else append("<p class=\"data-notice\">Soul Ledger export unavailable: inventory or catalog data is missing, or the inventory is unsupported.</p>")
                 if (player.items == null) append("<p class=\"data-notice\">Build events unavailable. Older bot versions did not retain them.</p>")
                 if (players.any { it.deathDetails == null || it.deathDetails.size < it.deaths }) append("<p class=\"data-notice\">Combat events may be incomplete: this cached match lacks some death records.</p>")
                 append("<ol class=\"timeline\">")
