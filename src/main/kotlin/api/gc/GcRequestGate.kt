@@ -16,7 +16,9 @@ internal class GcRequestGate(
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     private val mutex = Mutex()
-    private var retryAt = Long.MIN_VALUE
+    @Volatile private var retryAt = Long.MIN_VALUE
+    fun cooldownMillis(): Long = if (retryAt == Long.MIN_VALUE) 0 else (retryAt - clock()).coerceAtLeast(0)
+
     private var attempts = 0
     private var limitedOperation: Int? = null
 

@@ -132,6 +132,15 @@ class MatchMetadataService(
         try { return pending.values.minOfOrNull { it.due }?.minus(clock()) } finally { mutex.unlock() }
     }
 
+    /** Read-only, per-player queue status; never starts a metadata lookup. Null means a lookup owns the lock. */
+    fun pendingStatus(account: String): Pair<Int, Long?>? {
+        if (!mutex.tryLock()) return null
+        try {
+            val rows = pending.filterKeys { it.account == account }.values
+            return rows.size to rows.minOfOrNull { (it.due - clock()).coerceAtLeast(0) }
+        } finally { mutex.unlock() }
+    }
+
     /** Continue enrichment after a basic GC summary has already been posted. */
     suspend fun retryPending(tracked: Set<String>) {
         val due = mutex.withLock {
