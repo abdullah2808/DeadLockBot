@@ -57,7 +57,7 @@ object MatchCacheRepository {
         saveMetadata(match)
     }
     fun save(account: String, matches: List<MatchHistoryDTO>): Unit = transaction {
-        for (match in matches.sortedByDescending { it.matchId }.take(25)) {
+        for (match in matches.sortedByDescending { it.matchId }.take(40)) {
             CachedMatchTable.upsert(CachedMatchTable.matchId, onUpdateExclude = listOf(CachedMatchTable.metadata)) {
                 it[matchId] = match.matchId
                 it[startTime] = match.startTime
@@ -85,7 +85,7 @@ object MatchCacheRepository {
             }
         }
         val excess = CachedPlayerMatchTable.selectAll().where { CachedPlayerMatchTable.accountId eq account }
-            .orderBy(CachedPlayerMatchTable.matchId to SortOrder.DESC).drop(25)
+            .orderBy(CachedPlayerMatchTable.matchId to SortOrder.DESC).drop(40)
             .map { it[CachedPlayerMatchTable.matchId] }
         if (excess.isNotEmpty()) CachedPlayerMatchTable.deleteWhere {
             (accountId eq account) and (matchId inList excess)

@@ -76,13 +76,13 @@ class MatchCacheRepositoryTest {
         setup()
         MatchCacheRepository.save("107", listOf(match(1, 107)))
         MatchCacheRepository.save("208", listOf(match(1, 208)))
-        MatchCacheRepository.save("107", (2L..27L).map { match(it, 107) })
+        MatchCacheRepository.save("107", (2L..42L).map { match(it, 107) })
 
         assertNull(MatchCacheRepository.find("107", 1))
         assertNotNull(MatchCacheRepository.find("208", 1))
         transaction {
-            assertEquals(25L, CachedPlayerMatchTable.selectAll().where { CachedPlayerMatchTable.accountId eq "107" }.count())
-            assertEquals(26L, CachedMatchTable.selectAll().count())
+            assertEquals(40L, CachedPlayerMatchTable.selectAll().where { CachedPlayerMatchTable.accountId eq "107" }.count())
+            assertEquals(41L, CachedMatchTable.selectAll().count())
         }
     }
 
