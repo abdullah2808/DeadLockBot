@@ -116,6 +116,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                         continue
                     }
                     retries.forget(finished)
+                    data.WeeklyDigestRepository.record(finished.accountId, listOf(match))
 
                     try {
                         deliverPendingMatch(
@@ -169,6 +170,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                     },
                     remove = { MatchNotificationRepository.remove(it.accountId, it.matchId) },
                 )
+                sendWeeklyDigests(kord, users)
                 ranks?.checkDue(usersByAccount.keys)?.forEach { (account, change) ->
                     val user = usersByAccount[account] ?: return@forEach
                     announceRankChange(kord, user.channelId, user.discordUser, change)

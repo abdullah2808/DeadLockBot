@@ -41,6 +41,9 @@ import kotlinx.coroutines.flow.toList
 suspend fun registerCommands(kord: Kord) {
     // Replace the complete global list in one request, removing obsolete commands.
     kord.createGlobalApplicationCommands {
+        input("weekly", "Opt into weekly recaps, turn them off, or preview yours") {
+            string("action", "enable, disable, or preview") { required = true }
+        }
         input("signup", "Track your Deadlock matches") {
             string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
         }
@@ -94,6 +97,7 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
     kord.on<ChatInputCommandInteractionCreateEvent> {
         val interaction = interaction
         when (interaction.command.rootName) {
+            "weekly" -> handleWeekly(interaction)
             "signup" -> handleSignup(interaction, gcProvider)
             "steambot" -> {
                 val account = UserRepository.selectUserByDiscordID(interaction.user.id.toString())?.accountId
@@ -300,6 +304,7 @@ private suspend fun resolveAccountInput(raw: String, onError: suspend (String) -
 
 private suspend fun handleUnsubscribe(interaction: ChatInputCommandInteraction) {
     val discordId = interaction.user.id.toString()
+    data.WeeklyDigestRepository.disable(discordId)
     UserRepository.removeUser(discordId)
     interaction.deferPublicResponse().respond {
         content = "❌ You’ve been unsubscribed from match tracking."
