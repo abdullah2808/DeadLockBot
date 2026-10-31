@@ -52,6 +52,7 @@ suspend fun registerCommands(kord: Kord) {
         input("recentmatch", "Get Your Most Recent Match") {
             string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
         }
+        input("trends", "Compare your latest 20 tracked matches with the previous 20")
         input("lastfive", "Get Your Last Five Matches")
         input("match", "Show a full Deadlock match scoreboard") {
             string("match_id", "Match ID (leave blank for your latest tracked match)")
@@ -109,6 +110,7 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
             }
             "unsubscribe" -> handleUnsubscribe(interaction)
             "recentmatch" -> handleRecentMatch(interaction, kord, gcProvider, metadata, playerNames)
+            "trends" -> handleTrends(interaction)
             "lastfive" -> handleLastFive(interaction, kord, gcProvider, metadata)
             "match" -> handleMatch(interaction, gcProvider, metadata, interaction.command.strings["match_id"])
             "profile" -> handleProfile(interaction, gcProvider, live, playerNames)
