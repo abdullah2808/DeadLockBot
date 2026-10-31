@@ -140,6 +140,21 @@ class DeadlockClientTest {
     }
 
     @Test
+    fun `getActiveMatches accepts the null fields the live feed reports`() = runTest {
+        val api = DeadlockClient(mockClient {
+            respond("""[{"match_id":7,"start_time":1793419293,"duration_s":null,"winning_team":null,"net_worth_team_0":136000,
+                "net_worth_team_1":136000,"spectators":4,"game_mode":1,"match_mode":4,
+                "players":[{"account_id":3000000000,"team":0,"hero_id":6,"abandoned":null}]}]""",
+                HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }, 0)
+        val match = api.getActiveMatches().single()
+        assertEquals(7, match.matchId)
+        assertNull(match.durationS)
+        assertEquals(3000000000, match.players.single().accountId)
+        api.close()
+    }
+
+    @Test
     fun `getActiveMatches throws after exhausting retries`() = runTest {
         val client = mockClient {
             respond(content = "", status = HttpStatusCode.InternalServerError)
