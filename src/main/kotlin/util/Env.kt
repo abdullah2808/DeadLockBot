@@ -52,6 +52,10 @@ object Env {
     val STEAM_AUTO_ACCEPT_FRIENDS: Boolean = optional("STEAM_AUTO_ACCEPT_FRIENDS")?.let {
         it.lowercase().toBooleanStrictOrNull() ?: error("STEAM_AUTO_ACCEPT_FRIENDS must be true or false")
     } ?: true
+    // Diagnostic only: log what Steam rich presence reports for tracked friends. See docs/rich-presence-probe.md.
+    val STEAM_RICH_PRESENCE_PROBE: Boolean = optional("STEAM_RICH_PRESENCE_PROBE")?.let {
+        it.lowercase().toBooleanStrictOrNull() ?: error("STEAM_RICH_PRESENCE_PROBE must be true or false")
+    } ?: false
 
     // Optional deadlock-api.com key: raises its Steam-backed metadata quota from 3 to 300 lookups per hour.
     val DEADLOCK_API_KEY: String? = optional("DEADLOCK_API_KEY")

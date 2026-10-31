@@ -97,6 +97,7 @@ private fun buildGcProvider(): MatchHistoryProvider? {
             load = { GcQueryLog.since(System.currentTimeMillis() - DAY_MILLIS) },
             record = { GcQueryLog.record(it, pruneBefore = it - DAY_MILLIS) },
         ),
+        richPresenceProbe = Env.STEAM_RICH_PRESENCE_PROBE,
     ).also { it.start() }, save = { account, matches ->
         MatchCacheRepository.save(account, matches)
         data.WeeklyDigestRepository.record(account, matches)
