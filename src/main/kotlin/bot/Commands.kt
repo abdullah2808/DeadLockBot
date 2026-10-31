@@ -26,6 +26,7 @@ import dev.kord.core.on
 import data.UserRepository
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.behavior.interaction.response.respond
+import dev.kord.rest.builder.interaction.GlobalMultiApplicationCommandBuilder
 import dev.kord.rest.builder.interaction.string
 import util.MatchMessageGenerator
 import util.MatchScoreboard
@@ -40,32 +41,7 @@ import kotlinx.coroutines.flow.toList
 
 suspend fun registerCommands(kord: Kord) {
     // Replace the complete global list in one request, removing obsolete commands.
-    kord.createGlobalApplicationCommands {
-        input("weekly", "Opt into weekly recaps, turn them off, or preview yours") {
-            string("action", "enable, disable, or preview") { required = true }
-        }
-        input("signup", "Track your Deadlock matches") {
-            string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
-        }
-        input("unsubscribe", "Stop tracking your matches")
-        input("steambot", "Add the Steam bot and check your friend status")
-        input("recentmatch", "Get Your Most Recent Match") {
-            string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
-        }
-        input("trends", "Compare your latest 20 tracked matches with the previous 20")
-        input("lastfive", "Get Your Last Five Matches")
-        input("match", "Show a full Deadlock match scoreboard") {
-            string("match_id", "Match ID (leave blank for your latest tracked match)")
-        }
-        input("party", "See results alongside other tracked players in this channel")
-        input("profile", "Show a Deadlock profile card: rank, featured heroes and stats") {
-            string("account_id", "Account ID, SteamID64, or Steam profile URL (leave blank for yours)")
-        }
-        input("status", "Show your tracking sync, pending reports and current cooldowns")
-        input("live", "Check whether a player is in a live Deadlock match") {
-            string("account_id", "Account ID, SteamID64, or Steam profile URL (leave blank for yours)")
-        }
-    }
+    kord.createGlobalApplicationCommands { botCommands() }
 
     // Legacy commands in this server shadow the application's global commands.
     // Check first so subsequent starts do not repeatedly overwrite an empty list.
@@ -81,6 +57,41 @@ suspend fun registerCommands(kord: Kord) {
     } catch (e: Exception) {
         // A missing guild or access failure should not stop the bot's global commands.
         println("Legacy command cleanup for guild $legacyGuild failed; will retry on next startup: ${e.message}")
+    }
+}
+
+internal fun GlobalMultiApplicationCommandBuilder.botCommands() {
+    input("weekly", "Opt into weekly recaps, turn them off, or preview yours") {
+        string("action", "enable, disable, or preview") { required = true }
+        publicOption()
+    }
+    input("signup", "Track your Deadlock matches") {
+        string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
+    }
+    input("unsubscribe", "Stop tracking your matches")
+    input("steambot", "Add the Steam bot and check your friend status") { publicOption() }
+    input("recentmatch", "Get Your Most Recent Match") {
+        string("account_id", "Your account ID, SteamID64, or Steam profile URL") { required = true }
+    }
+    input("trends", "Compare your latest 20 tracked matches with the previous 20") { publicOption() }
+    input("lastfive", "Get Your Last Five Matches")
+    input("match", "Show a full Deadlock match scoreboard") {
+        string("match_id", "Match ID (leave blank for your latest tracked match)")
+    }
+    input("party", "See results alongside other tracked players in this channel") { publicOption() }
+    input("profile", "Show a Deadlock profile card: rank, featured heroes and stats") {
+        string("account_id", "Account ID, SteamID64, or Steam profile URL (leave blank for yours)")
+    }
+    input("status", "Show your tracking sync, pending reports and current cooldowns")
+    input("active", "See which tracked players in this channel are playing right now") { publicOption() }
+    input("matchalerts", "Post in this channel when a tracked player appears in a live match") {
+        string("action", "enable, disable, or status") {
+            required = true
+            for (action in listOf("enable", "disable", "status")) choice(action, action)
+        }
+    }
+    input("live", "Check whether a player is in a live Deadlock match") {
+        string("account_id", "Account ID, SteamID64, or Steam profile URL (leave blank for yours)")
     }
 }
 
@@ -105,7 +116,7 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
             "steambot" -> {
                 val account = UserRepository.selectUserByDiscordID(interaction.user.id.toString())?.accountId
                 gcProvider?.updateTrackedAccounts(UserRepository.getAllUsers().map { it.accountId }.toSet())
-                interaction.deferEphemeralResponse().respond {
+                interaction.deferWithVisibility().respond {
                     content = steamOnboarding(gcProvider, account)
                     steamBotButton(gcProvider)
                 }
@@ -118,6 +129,8 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
             "party" -> handleParty(interaction)
             "profile" -> handleProfile(interaction, gcProvider, live, playerNames)
             "status" -> handleTrackingStatus(interaction, gcProvider, metadata)
+            "active" -> handleActive(interaction, gcProvider, live)
+            "matchalerts" -> handleMatchAlerts(interaction)
             "live" -> handleLive(interaction, gcProvider, live, playerNames)
         }
     }

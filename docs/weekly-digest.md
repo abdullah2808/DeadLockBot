@@ -1,6 +1,6 @@
 # Weekly Discord digest
 
-Run `/weekly action:enable` in your registered tracking channel to opt in. `/weekly action:disable` removes your subscription; `/weekly action:preview` privately previews your last completed week. Instant recaps continue as before.
+Run `/weekly action:enable` in your registered tracking channel to opt in. `/weekly action:disable` removes your subscription; `/weekly action:preview` privately previews your last completed week, or shares it in the channel with `public:True`. Enabling and disabling always stay private. Instant recaps continue as before.
 
 Starting with the first Monday after opting in, after 00:00 UTC, the scheduler sends one message per channel for opted-in players. The first cycle after a restart catches up only the most recently completed week; older weeks are not replayed. Match **start time** assigns the week, using [Monday 00:00, next Monday 00:00). No configurable timezone is introduced in this version.
 

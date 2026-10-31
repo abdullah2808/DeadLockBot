@@ -19,22 +19,30 @@ class LiveMatchService(
     private companion object {
         const val LIVE_TTL_MS = 60_000L
         const val PROFILE_TTL_MS = 5 * 60_000L
+        const val BACKGROUND_GC_RETRY_MS = 2 * 60 * 60_000L
     }
     data class Snapshot(val matches: List<ActiveMatchDTO>, val fromGc: Boolean)
 
     private val liveMutex = Mutex()
     private var live: Pair<Long, Snapshot>? = null
+    private var gcFailedAt: Long? = null
     private val profileMutex = Mutex()
     private val profiles = object : LinkedHashMap<String, Pair<Long, ProfileCard>>(100, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, ProfileCard>>) = size > 200
     }
 
-    /** Throws only when every source failed, so an empty list always means nobody listed is live. */
-    suspend fun activeMatches(): Snapshot = liveMutex.withLock {
+    /**
+     * Throws only when every source failed, so an empty list always means nobody listed is live.
+     * An unanswered GC request resets the shared Steam session, so unattended [background] callers
+     * leave a GC that just failed alone for longer and use the fallback instead.
+     */
+    suspend fun activeMatches(background: Boolean = false): Snapshot = liveMutex.withLock {
         live?.let { (at, snapshot) -> if (clock() - at < LIVE_TTL_MS) return@withLock snapshot }
         var error: Exception? = null
-        val fromGc = try { gc?.activeMatches() } catch (e: CancellationException) { throw e } catch (e: Exception) {
+        val avoidGc = background && gcFailedAt?.let { clock() - it < BACKGROUND_GC_RETRY_MS } == true
+        val fromGc = if (avoidGc) null else try { gc?.activeMatches()?.also { gcFailedAt = null } } catch (e: CancellationException) { throw e } catch (e: Exception) {
             println("GC active matches unavailable, trying deadlock-api: ${e.message}")
+            gcFailedAt = clock()
             error = e
             null
         }

@@ -64,7 +64,7 @@ suspend fun main() = coroutineScope {
     val playerNames = PlayerNameService(steamName = { gcProvider?.steamPlayerName(it) }, profileName = profileResolver::playerName)
     val live = LiveMatchService(gcProvider, apiClient::getActiveMatches)
     handleCommands(kord, gcProvider, metadata, playerNames, live)
-    val scheduler = launch { startScheduler(kord, gcProvider, metadata) }
+    val scheduler = launch { startScheduler(kord, gcProvider, metadata, live) }
     try {
         kord.login { presence { playing("tracking Deadlock matches") } }
     } finally {

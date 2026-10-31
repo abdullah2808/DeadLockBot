@@ -50,6 +50,37 @@ class LiveMatchServiceTest {
     }
 
     @Test
+    fun `background checks leave a failing GC alone for two hours while commands can still ask it`() = runTest {
+        var gcCalls = 0
+        var now = 0L
+        val service = LiveMatchService(gc({ gcCalls++; throw IOException("no answer") }), { listOf(match) }, clock = { now })
+        assertFalse(service.activeMatches(background = true).fromGc)
+        assertEquals(1, gcCalls)
+
+        now = 60_000
+        assertFalse(service.activeMatches(background = true).fromGc)
+        assertEquals(1, gcCalls, "a background check must not ask the GC again yet")
+
+        now = 120_000
+        service.activeMatches()
+        assertEquals(2, gcCalls, "commands aren't held back")
+
+        now = 120_000 + 2 * 60 * 60_000L
+        service.activeMatches(background = true)
+        assertEquals(3, gcCalls, "the GC is tried again after the wait")
+    }
+
+    @Test
+    fun `background checks share the one-minute snapshot with commands`() = runTest {
+        var gcCalls = 0
+        val service = LiveMatchService(gc({ gcCalls++; listOf(match) }), null, clock = { 0L })
+        service.activeMatches(background = true)
+        service.activeMatches()
+        service.findLive(107)
+        assertEquals(1, gcCalls)
+    }
+
+    @Test
     fun `profile cards are cached per account for five minutes`() = runTest {
         var calls = 0
         var now = 0L
