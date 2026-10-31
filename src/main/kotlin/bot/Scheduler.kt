@@ -60,6 +60,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
             try {
                 val users = UserRepository.getAllUsers()
                 val usersByAccount = users.associateBy { it.accountId }
+                TrackingRuntime.retain(usersByAccount.keys)
                 gcProvider?.updateTrackedAccounts(usersByAccount.keys)
 
                 if (timing.pollDue()) {
@@ -76,6 +77,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                     }
                 }
 
+                TrackingRuntime.pending(pending.keys)
                 for (finished in pending.keys.toList()) {
                     val user = usersByAccount[finished.accountId]
                     if (user == null) {
@@ -140,6 +142,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                         pending[finished] = (pending[finished] ?: 0) + 1
                     }
                 }
+                TrackingRuntime.pending(pending.keys)
                 metadataService?.retryPending(usersByAccount.keys)
                 if (metadataService != null) enrichPostedNotifications(
                     awaiting = {

@@ -16,6 +16,13 @@ class CommandVisibilityTest {
         }
     }
 
+    @Test fun `every handled command is registered and status has no public toggle`() {
+        val names = commands.map { it.name }
+        for (name in listOf("weekly", "signup", "unsubscribe", "steambot", "recentmatch", "trends", "lastfive", "match", "party", "profile", "status", "live"))
+            assertContains(names, name)
+        assertTrue(options("status").none { it.name == "public" })
+    }
+
     @Test fun `required options precede optional ones as Discord demands`() {
         for (command in commands) {
             val required = command.options.value.orEmpty().map { it.required.orElse(false) }

@@ -82,6 +82,7 @@ internal fun GlobalMultiApplicationCommandBuilder.botCommands() {
     input("profile", "Show a Deadlock profile card: rank, featured heroes and stats") {
         string("account_id", "Account ID, SteamID64, or Steam profile URL (leave blank for yours)")
     }
+    input("status", "Show your tracking sync, pending reports and current cooldowns")
     input("live", "Check whether a player is in a live Deadlock match") {
         string("account_id", "Account ID, SteamID64, or Steam profile URL (leave blank for yours)")
     }
@@ -120,6 +121,7 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
             "match" -> handleMatch(interaction, gcProvider, metadata, interaction.command.strings["match_id"])
             "party" -> handleParty(interaction)
             "profile" -> handleProfile(interaction, gcProvider, live, playerNames)
+            "status" -> handleTrackingStatus(interaction, gcProvider, metadata)
             "live" -> handleLive(interaction, gcProvider, live, playerNames)
         }
     }

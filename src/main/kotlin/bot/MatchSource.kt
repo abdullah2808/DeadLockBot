@@ -43,9 +43,11 @@ class ActiveFeedMatchSource(private val client: DeadlockClient) : MatchSource {
         } catch (e: Exception) {
             // Preserve state and report nothing: treating a failed fetch as "no
             // live matches" would falsely flag every in-progress match as finished.
+            trackedAccountIds.forEach { TrackingRuntime.failed(it, "Active-feed lookup failed; retrying on the next poll") }
             println("active-matches poll failed, keeping prior state: ${e.message}")
             return emptyList()
         }
+        trackedAccountIds.forEach { TrackingRuntime.synced(it) }
         return reconcile(active, trackedAccountIds)
     }
 
