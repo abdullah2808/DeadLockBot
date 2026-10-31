@@ -32,6 +32,17 @@ class TrackingStatusTest {
         assertEquals(0, service.pendingStatus("2")!!.first)
         assertEquals(1, calls)
     }
+    @Test fun `delivery problem names the channel, the cause and the way out`() {
+        val text = trackingStatusText(TrackingRuntime.Sync(), null, false, null, 1, 0, 0 to null, "100", ChannelProblem.NO_ACCESS)
+        assertContains(text, "Notification channel: <#100>")
+        assertContains(text, "permission to post in <#100>")
+        assertContains(text, "/unsubscribe")
+    }
+    @Test fun `healthy channel reports no delivery problem`() {
+        val text = trackingStatusText(TrackingRuntime.Sync(), null, false, null, 0, 0, 0 to null, "100")
+        assertContains(text, "Notification channel: <#100>")
+        assertFalse("delivery problem" in text)
+    }
     @Test fun `fallback and busy queue are explained`() {
         val text = trackingStatusText(TrackingRuntime.Sync(), null, false, "123", 0, 0, null)
         assertContains(text, "partial coverage")
