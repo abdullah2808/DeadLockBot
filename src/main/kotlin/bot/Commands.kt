@@ -23,6 +23,8 @@ import dev.kord.core.entity.interaction.ActionInteraction
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.event.interaction.ComponentInteractionCreateEvent
 import dev.kord.core.on
+import data.TrackedAccountData
+import data.UnsubscribeOutcome
 import data.UserRepository
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.behavior.interaction.response.respond
@@ -309,12 +311,27 @@ private suspend fun resolveAccountInput(raw: String, onError: suspend (String) -
 }
 
 private suspend fun handleUnsubscribe(interaction: ChatInputCommandInteraction) {
+    val response = interaction.deferPublicResponse()
     val discordId = interaction.user.id.toString()
-    data.WeeklyDigestRepository.disable(discordId)
-    UserRepository.removeUser(discordId)
-    interaction.deferPublicResponse().respond {
-        content = "❌ You’ve been unsubscribed from match tracking."
+    val outcome = try {
+        withContext(Dispatchers.IO) { TrackedAccountData.unsubscribe(discordId) }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        println("Unsubscribe failed for $discordId: ${e.message}")
+        response.respond { content = "I couldn't unsubscribe you right now. Please try again shortly." }
+        return
     }
+    response.respond { content = unsubscribeMessage(outcome) }
+}
+
+internal fun unsubscribeMessage(outcome: UnsubscribeOutcome) = when (outcome) {
+    UnsubscribeOutcome.NOT_SIGNED_UP -> "You aren't signed up for match tracking, so there's nothing to remove."
+    UnsubscribeOutcome.DATA_DELETED -> "❌ You’ve been unsubscribed from match tracking. " +
+        "I deleted your saved match history and weekly recap data. " +
+        "Matches you shared with other tracked players stay available to them, including your row on those scoreboards."
+    UnsubscribeOutcome.CLEANUP_PENDING -> "❌ You’ve been unsubscribed from match tracking, " +
+        "but I couldn't delete your saved match history and weekly recap data just now. I'll retry automatically."
 }
 
 private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kord: Kord, gc: MatchHistoryProvider?, metadata: MatchMetadataService?) {

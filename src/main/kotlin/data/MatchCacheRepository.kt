@@ -90,9 +90,24 @@ object MatchCacheRepository {
         if (excess.isNotEmpty()) CachedPlayerMatchTable.deleteWhere {
             (accountId eq account) and (matchId inList excess)
         }
-        // Other party members keep shared data alive after this account trims its history.
+        deleteUnreferencedMatches()
+    }
+
+    /** Forgets one account's history; teammates' references keep shared match rows and their metadata. */
+    fun deleteAccount(account: String): Unit = transaction {
+        CachedPlayerMatchTable.deleteWhere { accountId eq account }
+        deleteUnreferencedMatches()
+    }
+
+    /** Forgets every account missing from `tracked_users`, including rows stored before lookups stopped persisting. */
+    fun deleteUntracked(): Unit = transaction {
+        CachedPlayerMatchTable.deleteWhere { accountId notInSubQuery UserTable.select(UserTable.accountId) }
+        deleteUnreferencedMatches()
+    }
+
+    // Other party members keep shared data alive after an account trims or deletes its history.
+    private fun deleteUnreferencedMatches() {
         CachedMatchTable.deleteWhere { matchId notInSubQuery CachedPlayerMatchTable.select(CachedPlayerMatchTable.matchId) }
-        Unit
     }
 
     fun find(account: String, id: Long): MatchHistoryDTO? = transaction {

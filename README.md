@@ -8,7 +8,22 @@ A Kotlin Discord bot that tracks Deadlock matches and posts match recaps.
 - `/match` shows the latest match for your account linked through `/signup`.
 - `/recentmatch account_id:<id>` posts a player recap. Account IDs, SteamID64s, and numeric Steam profile URLs are accepted.
 - `/lastfive` posts the latest five matches for your linked account.
-- `/unsubscribe` stops automatic tracking.
+- `/unsubscribe` stops automatic tracking and deletes your saved match history. See [Stored match data](#stored-match-data).
+
+### Stored match data
+
+The bot stores match history only for accounts signed up with `/signup`: the latest 40 matches, plus a 21-day archive for players who opted into `/weekly`.
+
+`/unsubscribe` deletes your registration, your weekly recap opt-in and archive, your saved match history, and any saved match that no other tracked player also has, including its full report data. It keeps:
+
+- Matches shared with another tracked player, because they still need them. Their full report data covers everyone in the match, so it includes your row until no tracked player references that match.
+- Messages already posted in Discord.
+- Your last-seen rank badge.
+- A notification still waiting for full match details, until those details arrive or for at most 24 hours.
+
+If the deletion fails, you are still unsubscribed and the reply says so. The bot retries on startup and every six hours, which also removes data left by accounts that are no longer tracked.
+
+Looking up another account, for example with `/recentmatch`, doesn't store that account's history. Its history stays in memory for 30 seconds and its match details stay in a memory cache of 256 matches until the bot restarts. Details are saved only if a tracked player was also in the match. After a restart the bot fetches them again, public archive first.
 
 The scoreboard groups all players by team and displays heroes, K/D/A, souls, player damage, objective damage, healing, team soul totals, and final shop items. The latest recorded stats snapshot supplies damage and healing. Sold items and hero ability upgrades are excluded from the inventory. Longer inventories wrap onto a second row. Your row is outlined when viewing your latest linked match.
 

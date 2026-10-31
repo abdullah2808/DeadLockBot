@@ -39,6 +39,10 @@ object UserRepository {
         UserTable.deleteWhere { UserTable.discordId eq discordId }
     }
 
+    fun isTracked(accountId: String): Boolean = transaction {
+        !UserTable.selectAll().where { UserTable.accountId eq accountId }.empty()
+    }
+
     fun getAllUsers(): List<UserRecord> = transaction {
         UserTable.selectAll().map {
             UserRecord(
