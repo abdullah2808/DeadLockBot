@@ -49,7 +49,7 @@ internal fun partyReport(results: List<PartyResult>, heroName: (Int) -> String):
 }.take(1950)
 
 internal suspend fun handleParty(interaction: ChatInputCommandInteraction) {
-    val response = interaction.deferEphemeralResponse()
+    val response = interaction.deferWithVisibility()
     try {
         val text = withContext(Dispatchers.IO) {
             val user = UserRepository.selectUserByDiscordID(interaction.user.id.toString())

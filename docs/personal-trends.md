@@ -1,6 +1,6 @@
 # Personal performance trends
 
-Run `/trends` after `/signup`. Only you see the response. The command reads retained tracker data; it does not spend Steam metadata queries.
+Run `/trends` after `/signup`. Only you see the response unless you set `public:True`, which posts it in the channel. The command reads retained tracker data; it does not spend Steam metadata queries.
 
 Illustrative Discord response (sample values):
 

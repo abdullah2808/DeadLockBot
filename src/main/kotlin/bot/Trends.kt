@@ -52,7 +52,7 @@ internal fun trendReport(input: List<TrendSample>): String {
 }
 
 internal suspend fun handleTrends(interaction: ChatInputCommandInteraction) {
-    val response = interaction.deferEphemeralResponse()
+    val response = interaction.deferWithVisibility()
     try {
         val text = withContext(Dispatchers.IO) {
             val user = UserRepository.selectUserByDiscordID(interaction.user.id.toString())
