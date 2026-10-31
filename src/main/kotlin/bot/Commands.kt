@@ -83,6 +83,13 @@ internal fun GlobalMultiApplicationCommandBuilder.botCommands() {
         string("account_id", "Account ID, SteamID64, or Steam profile URL (leave blank for yours)")
     }
     input("status", "Show your tracking sync, pending reports and current cooldowns")
+    input("active", "See which tracked players in this channel are playing right now") { publicOption() }
+    input("matchalerts", "Post in this channel when a tracked player appears in a live match") {
+        string("action", "enable, disable, or status") {
+            required = true
+            for (action in listOf("enable", "disable", "status")) choice(action, action)
+        }
+    }
     input("live", "Check whether a player is in a live Deadlock match") {
         string("account_id", "Account ID, SteamID64, or Steam profile URL (leave blank for yours)")
     }
@@ -122,6 +129,8 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
             "party" -> handleParty(interaction)
             "profile" -> handleProfile(interaction, gcProvider, live, playerNames)
             "status" -> handleTrackingStatus(interaction, gcProvider, metadata)
+            "active" -> handleActive(interaction, gcProvider, live)
+            "matchalerts" -> handleMatchAlerts(interaction)
             "live" -> handleLive(interaction, gcProvider, live, playerNames)
         }
     }

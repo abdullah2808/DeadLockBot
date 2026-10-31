@@ -1,7 +1,11 @@
 package util
 
+import api.asDiscordTitleText
 import api.gc.ProfileCard
+import bot.ActiveBoard
+import bot.ListedMatch
 import bot.RankChange
+import bot.SeatedPlayer
 import dev.kord.common.Color
 import dev.kord.rest.builder.message.EmbedBuilder
 import models.ActiveMatchDTO
@@ -10,7 +14,7 @@ import models.RankBadge
 import java.text.NumberFormat
 import java.util.Locale
 
-/** Embeds for `/profile` and `/live`. Hero names are injectable so tests stay offline. */
+/** Embeds for `/profile`, `/live`, `/active` and match alerts. Hero names are injectable so tests stay offline. */
 object LiveMessageGenerator {
     private val numbers = NumberFormat.getIntegerInstance(Locale.US)
     private fun Long.formatted() = numbers.format(this)
@@ -94,6 +98,102 @@ object LiveMessageGenerator {
             }
         }
         footer { text = "Use /match ${match.matchId} once the match ends for the full scoreboard." }
+    }
+
+    /** [listFromGc] names the live list's source, and is null when no source could be reached. */
+    internal fun activeEmbed(
+        board: ActiveBoard,
+        listFromGc: Boolean?,
+        steamBotConfigured: Boolean,
+        nowEpochSeconds: Long = System.currentTimeMillis() / 1000,
+        heroName: (Int) -> String = HeroRepository::getHeroName,
+    ) = EmbedBuilder().apply {
+        title = "Tracked players in this channel"
+        color = Color(0xE74C3C)
+        val lines = buildList {
+            if (listFromGc == null) {
+                add("⚠️ The live match list is unavailable right now, so match details can't be shown.")
+                add("")
+            }
+            if (board.listed.isNotEmpty()) add("**In a listed match**")
+            board.listed.forEach { listed ->
+                add(activeMatchDetails(listed, nowEpochSeconds))
+                listed.players.forEach { add(seatLine(it, heroName)) }
+                add("")
+            }
+            if (board.inDeadlock.isNotEmpty()) {
+                add("**In Deadlock, match unknown**")
+                add("Steam shows they have the game open, which doesn't prove they're in a match.")
+                board.inDeadlock.forEach { add("• **${displayName(it.name)}**") }
+                add("")
+            }
+            if (board.notSeen.isNotEmpty()) {
+                add("**Not seen**")
+                add("They may still be playing, because the live list features only some games.")
+                board.notSeen.forEach { player ->
+                    val reason = if (player.inDeadlock == false) "Steam doesn't show them in Deadlock" else "the bot can't see their Steam status"
+                    add("• **${displayName(player.name)}**: $reason")
+                }
+            }
+        }
+        description = fitLines(lines.dropLastWhile { it.isEmpty() })
+        val source = when (listFromGc) {
+            true -> "Valve's Watch list"
+            false -> "deadlock-api's copy of Valve's Watch list"
+            null -> null
+        }
+        val tip = if (steamBotConfigured && board.notSeen.any { it.inDeadlock == null }) "Steam friends of the bot show their Steam status: /steambot." else null
+        footer { text = listOfNotNull(source?.let { "Matches from $it, refreshed at most once a minute." }, tip).joinToString(" ").ifEmpty { "Steam status only." } }
+    }
+
+    /** Elapsed time goes stale in a posted message, so this uses a Discord timestamp that keeps counting. */
+    internal fun matchAlertEmbed(listed: ListedMatch, heroName: (Int) -> String = HeroRepository::getHeroName) = EmbedBuilder().apply {
+        val names = listed.players.map { displayName(it.player.name.take(32)) }
+        val subject = when (names.size) {
+            1 -> "${names[0]} is"
+            2 -> "${names[0]} and ${names[1]} are"
+            3 -> "${names[0]}, ${names[1]} and ${names[2]} are"
+            else -> "${names[0]}, ${names[1]} and ${names.size - 2} others are"
+        }
+        title = "🎮 $subject in a match"
+        color = Color(0xE74C3C)
+        val match = listed.match
+        description = fitLines(listed.players.map { seatLine(it, heroName) } + listOfNotNull(
+            MatchModes.label(match.gameMode, match.matchMode),
+            if (match.startTime > 0) "Started <t:${match.startTime}:R>" else match.durationS?.takeIf { it > 0 }?.let { "⏱ ${formatDuration(it)} when posted" },
+            "Match `${match.matchId}`",
+        ).joinToString(" · "))
+        footer { text = "Only matches on Valve's Watch list are detected, so other matches never alert. /matchalerts action:disable turns these off." }
+    }
+
+    private fun activeMatchDetails(listed: ListedMatch, nowEpochSeconds: Long): String {
+        val match = listed.match
+        return listOfNotNull(
+            MatchModes.label(match.gameMode, match.matchMode),
+            elapsedSeconds(match, nowEpochSeconds)?.let { "⏱ ${formatDuration(it)}" },
+            if (match.netWorthTeam0 > 0 || match.netWorthTeam1 > 0)
+                "Souls: ${teamName(0)} ${match.netWorthTeam0.formatted()}, ${teamName(1)} ${match.netWorthTeam1.formatted()}" else null,
+            "Match `${match.matchId}`",
+        ).joinToString(" · ")
+    }
+
+    private fun seatLine(seated: SeatedPlayer, heroName: (Int) -> String): String {
+        val left = if (seated.seat.abandoned == true) " (left)" else ""
+        return "• **${displayName(seated.player.name)}**: ${heroName(seated.seat.heroId)} for ${teamName(seated.seat.team)}$left"
+    }
+
+    private fun displayName(name: String) = name.take(40).asDiscordTitleText()
+
+    /** Keeps within Discord's description limit however many players a channel tracks. */
+    private fun fitLines(lines: List<String>, limit: Int = 4000): String {
+        val kept = mutableListOf<String>()
+        var used = 0
+        for (line in lines) {
+            if (used + line.length + 1 > limit) return (kept + "…and ${lines.size - kept.size} more lines.").joinToString("\n")
+            kept += line
+            used += line.length + 1
+        }
+        return kept.joinToString("\n")
     }
 
     fun rankChangeEmbed(playerName: String, change: RankChange, previous: RankBadge?, current: RankBadge?) = EmbedBuilder().apply {

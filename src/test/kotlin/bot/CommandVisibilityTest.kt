@@ -9,7 +9,7 @@ class CommandVisibilityTest {
     private fun options(name: String) = commands.single { it.name == name }.options.value.orEmpty()
 
     @Test fun `every always private command offers an optional public toggle`() {
-        for (name in listOf("weekly", "steambot", "trends", "party")) {
+        for (name in listOf("weekly", "steambot", "trends", "party", "active")) {
             val toggle = options(name).single { it.name == "public" }
             assertEquals(ApplicationCommandOptionType.Boolean, toggle.type, name)
             assertFalse(toggle.required.orElse(false), name)
@@ -18,9 +18,10 @@ class CommandVisibilityTest {
 
     @Test fun `every handled command is registered and status has no public toggle`() {
         val names = commands.map { it.name }
-        for (name in listOf("weekly", "signup", "unsubscribe", "steambot", "recentmatch", "trends", "lastfive", "match", "party", "profile", "status", "live"))
+        for (name in listOf("weekly", "signup", "unsubscribe", "steambot", "recentmatch", "trends", "lastfive", "match", "party", "profile", "status", "live", "active", "matchalerts"))
             assertContains(names, name)
         assertTrue(options("status").none { it.name == "public" })
+        assertTrue(options("matchalerts").none { it.name == "public" })
     }
 
     @Test fun `required options precede optional ones as Discord demands`() {

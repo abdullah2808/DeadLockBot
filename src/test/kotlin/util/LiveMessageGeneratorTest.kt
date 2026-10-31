@@ -2,6 +2,10 @@ package util
 
 import api.gc.ProfileCard
 import api.gc.ProfileHero
+import bot.ActiveBoard
+import bot.ChannelPlayer
+import bot.ListedMatch
+import bot.SeatedPlayer
 import models.ActiveMatchDTO
 import models.ActiveMatchPlayer
 import models.Rank
@@ -30,6 +34,79 @@ class LiveMessageGeneratorTest {
         assertContains(embed.description!!, "Unranked or hidden")
         assertTrue(embed.fields.isEmpty())
         assertNull(embed.thumbnail)
+    }
+
+    private val listedMatch = ListedMatch(
+        ActiveMatchDTO(matchId = 55, startTime = 1_000, netWorthTeam0 = 20_000, netWorthTeam1 = 26_500, matchMode = 4),
+        listOf(
+            SeatedPlayer(ChannelPlayer(1, "Alice"), ActiveMatchPlayer(1, 0, 7)),
+            SeatedPlayer(ChannelPlayer(2, "Bob"), ActiveMatchPlayer(2, 1, 9, abandoned = true)),
+        ),
+    )
+
+    @Test
+    fun `active embed groups a listed match with hero, team, elapsed time, mode and souls`() {
+        val embed = LiveMessageGenerator.activeEmbed(ActiveBoard(listOf(listedMatch), emptyList(), emptyList()), true, true, 1_725, heroName)
+        val description = embed.description!!
+        assertContains(description, "🏅 Ranked · ⏱ 12:05 · Souls: Amber 20,000, Sapphire 26,500 · Match `55`")
+        assertContains(description, "• **Alice**: Hero7 for Amber")
+        assertContains(description, "• **Bob**: Hero9 for Sapphire (left)")
+        assertContains(embed.footer!!.text, "Valve's Watch list")
+        assertFalse(description.contains("Not seen"))
+    }
+
+    @Test
+    fun `active embed never turns presence or absence into a claim it can't support`() {
+        val board = ActiveBoard(emptyList(), listOf(ChannelPlayer(3, "Carol", true)),
+            listOf(ChannelPlayer(4, "Dan", false), ChannelPlayer(5, "Erin", null)))
+        val embed = LiveMessageGenerator.activeEmbed(board, true, true, 1_725, heroName)
+        val description = embed.description!!
+        assertContains(description, "doesn't prove they're in a match")
+        assertContains(description, "• **Dan**: Steam doesn't show them in Deadlock")
+        assertContains(description, "• **Erin**: the bot can't see their Steam status")
+        assertContains(description, "They may still be playing")
+        assertFalse(description.contains("offline", ignoreCase = true))
+        assertContains(embed.footer!!.text, "/steambot")
+    }
+
+    @Test
+    fun `active embed says when the live list is unavailable or came from the fallback`() {
+        val board = ActiveBoard(emptyList(), emptyList(), listOf(ChannelPlayer(5, "Erin", null)))
+        val unavailable = LiveMessageGenerator.activeEmbed(board, null, false, 1_725, heroName)
+        assertContains(unavailable.description!!, "live match list is unavailable")
+        assertEquals("Steam status only.", unavailable.footer!!.text)
+        assertContains(LiveMessageGenerator.activeEmbed(board, false, false, 1_725, heroName).footer!!.text, "deadlock-api's copy")
+    }
+
+    @Test
+    fun `active embed escapes names and stays within Discord's limit for very large channels`() {
+        val board = ActiveBoard(emptyList(), emptyList(), (1L..300L).map { ChannelPlayer(it, "Player_*$it*" + "x".repeat(40), null) })
+        val description = LiveMessageGenerator.activeEmbed(board, true, true, 1_725, heroName).description!!
+        assertContains(description, "Player\\_\\*1\\*")
+        assertTrue(description.length <= 4096)
+        assertContains(description, "more lines.")
+    }
+
+    @Test
+    fun `match alert groups players and states the coverage limit without claiming the match just started`() {
+        val embed = LiveMessageGenerator.matchAlertEmbed(listedMatch, heroName)
+        assertEquals("🎮 Alice and Bob are in a match", embed.title)
+        val description = embed.description!!
+        assertContains(description, "• **Alice**: Hero7 for Amber")
+        assertContains(description, "🏅 Ranked · Started <t:1000:R> · Match `55`")
+        assertContains(embed.footer!!.text, "other matches never alert")
+        assertFalse(description.contains("@"))
+    }
+
+    @Test
+    fun `match alert titles stay short, and use the reported duration without a start time`() {
+        val seat = { id: Long -> SeatedPlayer(ChannelPlayer(id, "P$id" + "y".repeat(100)), ActiveMatchPlayer(id, 0, 7)) }
+        val many = LiveMessageGenerator.matchAlertEmbed(ListedMatch(ActiveMatchDTO(matchId = 1, durationS = 65), (1L..5L).map(seat)), heroName)
+        assertContains(many.title!!, "and 3 others are in a match")
+        assertTrue(many.title!!.length <= 256)
+        assertContains(many.description!!, "⏱ 1:05 when posted")
+        assertEquals("🎮 ${"P1" + "y".repeat(30)} is in a match",
+            LiveMessageGenerator.matchAlertEmbed(ListedMatch(ActiveMatchDTO(matchId = 1), listOf(seat(1))), heroName).title)
     }
 
     @Test

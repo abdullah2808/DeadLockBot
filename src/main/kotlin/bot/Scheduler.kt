@@ -1,6 +1,7 @@
 package bot
 
 import api.DeadlockClient
+import api.LiveMatchService
 import api.MatchMetadataService
 import api.gc.MatchHistoryProvider
 import data.MatchNotificationRepository
@@ -35,7 +36,8 @@ import util.MatchMessageGenerator
  * discovered via the authoritative Deadlock Game Coordinator ([GcMatchSource]);
  * otherwise it falls back to the top-150 active feed ([ActiveFeedMatchSource]).
  */
-suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null, metadataService: MatchMetadataService? = null) {
+suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null, metadataService: MatchMetadataService? = null,
+                           live: LiveMatchService? = null) {
     val client = DeadlockClient()
     val source: MatchSource = if (gcProvider != null) {
         println("Match source: Deadlock Game Coordinator.")
@@ -63,7 +65,8 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                 TrackingRuntime.retain(usersByAccount.keys)
                 gcProvider?.updateTrackedAccounts(usersByAccount.keys)
 
-                if (timing.pollDue()) {
+                val pollDue = timing.pollDue()
+                if (pollDue) {
                     try {
                         source.pollFinished(usersByAccount.keys).forEach { finished ->
                             if (usersByAccount[finished.accountId]?.lastMatchId == finished.matchId.toString()) return@forEach
@@ -174,6 +177,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                     remove = { MatchNotificationRepository.remove(it.accountId, it.matchId) },
                 )
                 sendWeeklyDigests(kord, users)
+                if (pollDue && live != null) announceLiveMatches(kord, users, live)
                 ranks?.checkDue(usersByAccount.keys)?.forEach { (account, change) ->
                     val user = usersByAccount[account] ?: return@forEach
                     announceRankChange(kord, user.channelId, user.discordUser, change)

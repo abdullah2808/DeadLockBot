@@ -8,9 +8,11 @@ A Kotlin Discord bot that tracks Deadlock matches and posts match recaps.
 - `/match` shows the latest match for your account linked through `/signup`.
 - `/recentmatch account_id:<id>` posts a player recap. Account IDs, SteamID64s, and numeric Steam profile URLs are accepted.
 - `/lastfive` posts the latest five matches for your linked account.
+- `/active` shows which players tracked in this channel are playing, as far as Valve's Watch list and Steam presence can tell.
+- `/matchalerts action:enable` posts once per match when a player tracked in this channel appears on Valve's Watch list. It is off by default, and matches outside that list never alert. See [Active players and match alerts](docs/active-players.md).
 - `/unsubscribe` stops automatic tracking.
 
-`/trends`, `/party`, `/steambot` and `/weekly action:preview` reply privately by default. Set their `public:True` option to post the reply in the channel instead. Discord fixes a reply's visibility before the command runs, so an error from a `public:True` command, such as a reminder to `/signup`, is also visible to the channel.
+`/active`, `/trends`, `/party`, `/steambot` and `/weekly action:preview` reply privately by default. Set their `public:True` option to post the reply in the channel instead. Discord fixes a reply's visibility before the command runs, so an error from a `public:True` command, such as a reminder to `/signup`, is also visible to the channel.
 
 The scoreboard groups all players by team and displays heroes, K/D/A, souls, player damage, objective damage, healing, team soul totals, and final shop items. The latest recorded stats snapshot supplies damage and healing. Sold items and hero ability upgrades are excluded from the inventory. Longer inventories wrap onto a second row. Your row is outlined when viewing your latest linked match.
 
