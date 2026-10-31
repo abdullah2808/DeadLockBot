@@ -96,6 +96,9 @@ internal object MatchExplorer {
             }
         }
         if (v.section == "build") {
+            util.SoulLedgerExport.url(r.match.matchInfo.players[v.player], r.matchId, r.assets.catalog)?.let { url ->
+                actionRow { linkButton(url) { label = "Open final build in Soul Ledger" } }
+            }
             val items = r.match.matchInfo.players[v.player].finalItems.filter { r.assets.catalog[it.itemId]?.type != "ability" }.distinctBy { it.itemId }.take(25)
             if (items.isNotEmpty()) actionRow { stringSelect(id(key, "item", v)) {
                 placeholder = "Inspect a final item"
