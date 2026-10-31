@@ -88,7 +88,7 @@ object LiveMessageGenerator {
                 inline = true
                 value = roster.joinToString("\n") { p ->
                     val tracked = trackedNames[p.accountId]?.let { " — **$it**" } ?: ""
-                    val abandoned = if (p.abandoned) " (left)" else ""
+                    val abandoned = if (p.abandoned == true) " (left)" else ""
                     "${heroName(p.heroId)}$tracked$abandoned"
                 }
             }
@@ -128,8 +128,7 @@ object LiveMessageGenerator {
     /** The GC's duration lags; derive it from the start time when that is available. */
     internal fun elapsedSeconds(match: ActiveMatchDTO, nowEpochSeconds: Long): Long? = when {
         match.startTime > 0 && nowEpochSeconds >= match.startTime -> nowEpochSeconds - match.startTime
-        match.durationS > 0 -> match.durationS
-        else -> null
+        else -> match.durationS?.takeIf { it > 0 }
     }
 
     private fun formatDuration(seconds: Long) = "%d:%02d".format(seconds / 60, seconds % 60)
