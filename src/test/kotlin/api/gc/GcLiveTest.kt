@@ -49,7 +49,7 @@ class GcLiveTest {
         assertEquals(55, match.matchId)
         assertEquals(4294967294L, match.players.single().accountId)
         assertEquals(1, match.players.single().team)
-        assertTrue(match.players.single().abandoned)
+        assertEquals(true, match.players.single().abandoned)
         assertEquals(30_000, match.netWorthTeam0)
         assertEquals(4, match.matchMode)
     }
