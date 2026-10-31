@@ -63,8 +63,11 @@ interface MatchHistoryProvider {
     fun autoAcceptFriendsEnabled(): Boolean = false
     fun authorizeSignupFriendRequest(accountId: String) {}
     fun updateTrackedAccounts(accounts: Set<String>) {}
+    fun trackingDiagnostics(): GcTrackingDiagnostics? = null
     fun close() {}
 }
+
+data class GcTrackingDiagnostics(val ready: Boolean, val sessionCooldownMillis: Long, val metadataWaitMillis: Long, val metadataRemaining: Int)
 
 data class MatchHistorySnapshot(val ids: List<Long>, val summaries: List<MatchHistoryDTO>)
 class GcHistoryPermissionException(val accountId: String) : IOException("GC denied match-history access for $accountId")
@@ -117,6 +120,9 @@ class GcClient(
     @Volatile private var identity: SteamBotIdentity? = null
     @Volatile private var reconnectRequested = false
     private val unansweredUntil = ConcurrentHashMap<Int, Long>()
+
+    override fun trackingDiagnostics() = GcTrackingDiagnostics(connected && gcWelcomed,
+        requestGate.cooldownMillis(), metadataBudget.waitMillis(true), metadataBudget.remaining(true))
 
     fun start() {
         running = true

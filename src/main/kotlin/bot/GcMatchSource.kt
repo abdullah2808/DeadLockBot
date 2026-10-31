@@ -22,10 +22,15 @@ class GcMatchSource(private val provider: MatchHistoryProvider) : MatchSource {
         val finished = mutableListOf<FinishedMatch>()
         for (accountId in trackedAccountIds) {
             val newest = try {
-                provider.recentMatchIds(accountId).firstOrNull()
+                provider.recentMatchIds(accountId).also { TrackingRuntime.synced(accountId) }.firstOrNull()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                TrackingRuntime.failed(accountId, when (e) {
+                    is api.gc.GcHistoryPermissionException -> "Access denied; check /steambot"
+                    is api.gc.GcRateLimitedException -> "Steam requests are cooling down"
+                    else -> "History lookup failed; retrying on the next poll"
+                })
                 println("GC match-history lookup failed for $accountId: ${e.message}")
                 null
             } ?: continue

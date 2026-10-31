@@ -37,5 +37,6 @@ class CachedMatchHistoryProvider(
     override fun autoAcceptFriendsEnabled() = delegate.autoAcceptFriendsEnabled()
     override fun authorizeSignupFriendRequest(accountId: String) = delegate.authorizeSignupFriendRequest(accountId)
     override fun updateTrackedAccounts(accounts: Set<String>) = delegate.updateTrackedAccounts(accounts)
+    override fun trackingDiagnostics() = delegate.trackingDiagnostics()
     override fun close() = delegate.close()
 }
