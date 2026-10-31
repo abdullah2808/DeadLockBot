@@ -101,7 +101,10 @@ GC history now preserves basic match summaries rather than discarding everything
 except IDs. CachedMatchTable stores shared match information/metadata once;
 CachedPlayerMatchTable stores each account's stats with a composite key. Retain
 25 player rows per account and delete shared rows only when no account references
-them. Recent commands use GC summaries, with metadata fallback only for incomplete
+them. Rows follow tracking status: CachedMatchHistoryProvider stores history only
+for accounts in tracked_users, /unsubscribe deletes through TrackedAccountData
+(a failed cleanup never blocks it), and the scheduler sweeps untracked rows on
+startup and every 6 hours. Recent commands use GC summaries, with metadata fallback only for incomplete
 rows. The scheduler can send a basic summary during API outages. Metadata requests
 share completed-match cache entries and a Retry-After cooldown, while unavailable
 basic data is retained with bounded backoff. scripts/update.py selects a published

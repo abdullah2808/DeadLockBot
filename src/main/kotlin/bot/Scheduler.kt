@@ -5,6 +5,7 @@ import api.MatchMetadataService
 import api.gc.MatchHistoryProvider
 import data.MatchNotificationRepository
 import data.PostedNotification
+import data.TrackedAccountData
 import data.UserRepository
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
@@ -54,6 +55,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
     val timing = NotificationTiming()
     // Rank changes come from GC profile cards, so they are only watched when a Steam session exists.
     val ranks = gcProvider?.let { gc -> RankTracker({ gc.profileCard(it) }) }
+    var nextSweepAt = 0L // the first cycle clears whatever an earlier run left behind
 
     try {
         while (true) {
@@ -62,6 +64,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                 val usersByAccount = users.associateBy { it.accountId }
                 TrackingRuntime.retain(usersByAccount.keys)
                 gcProvider?.updateTrackedAccounts(usersByAccount.keys)
+                nextSweepAt = sweepUntrackedDataIfDue(nextSweepAt)
 
                 if (timing.pollDue()) {
                     try {
@@ -198,6 +201,21 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
 
 private const val ENRICHMENT_WINDOW_MILLIS = 24 * 60 * 60_000L
 private const val MIN_WAKE_MILLIS = 5_000L
+private const val STORED_DATA_SWEEP_MILLIS = 6 * 60 * 60_000L
+
+/** Housekeeping must not cost a cycle of notifications, so a failure only waits for the next sweep. */
+private suspend fun sweepUntrackedDataIfDue(dueAt: Long): Long {
+    val now = System.currentTimeMillis()
+    if (now < dueAt) return dueAt
+    try {
+        withContext(Dispatchers.IO) { TrackedAccountData.sweepUntracked() }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        println("Could not sweep stored data for untracked accounts: ${e.message}")
+    }
+    return now + STORED_DATA_SWEEP_MILLIS
+}
 
 /** Best effort: the new badge is already recorded, so a failed post is not retried (and never repeated). */
 private suspend fun announceRankChange(kord: Kord, channelId: String?, playerName: String, change: RankChange) {

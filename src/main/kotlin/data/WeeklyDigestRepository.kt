@@ -6,6 +6,7 @@ import models.MatchHistoryDTO
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.notInSubQuery
 import org.jetbrains.exposed.sql.transactions.transaction
 
 object WeeklySettingsTable : Table("weekly_digest_settings") {
@@ -37,6 +38,14 @@ object WeeklyDigestRepository {
         Unit
     }
     fun disable(discord: String): Unit = transaction { WeeklySettingsTable.deleteWhere { discordId eq discord }; Unit }
+    fun deleteAccount(account: String): Unit = transaction { WeeklyMatchTable.deleteWhere { accountId eq account }; Unit }
+    /** Also drops opt-ins left behind by a failed unsubscribe, which would otherwise keep archiving that account. */
+    fun deleteUntracked(): Unit = transaction {
+        val tracked = UserTable.select(UserTable.accountId)
+        WeeklySettingsTable.deleteWhere { accountId notInSubQuery tracked }
+        WeeklyMatchTable.deleteWhere { accountId notInSubQuery tracked }
+        Unit
+    }
     fun subscribers(users: List<UserRepository.UserRecord>, eligibleBefore: Long = Long.MAX_VALUE): List<UserRepository.UserRecord> = transaction {
         val settings = WeeklySettingsTable.selectAll().associateBy { it[WeeklySettingsTable.discordId] }
         users.filter { user -> settings[user.discordId]?.let { it[WeeklySettingsTable.accountId] == user.accountId &&
