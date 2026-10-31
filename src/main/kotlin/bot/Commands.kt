@@ -27,7 +27,9 @@ import data.UserRepository
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.rest.builder.interaction.GlobalMultiApplicationCommandBuilder
+import dev.kord.rest.builder.interaction.integer
 import dev.kord.rest.builder.interaction.string
+import dev.kord.rest.builder.interaction.user
 import util.MatchMessageGenerator
 import util.MatchScoreboard
 import util.ScoreboardAssetLoader
@@ -79,6 +81,16 @@ internal fun GlobalMultiApplicationCommandBuilder.botCommands() {
         string("match_id", "Match ID (leave blank for your latest tracked match)")
     }
     input("party", "See results alongside other tracked players in this channel") { publicOption() }
+    input("compare", "Compare two players' recent Deadlock stats side by side") {
+        user("player", "A signed-up Discord user to compare")
+        string("account_id", "Or any account ID, SteamID64, or Steam profile URL")
+        user("against", "Signed-up Discord user on the other side (default: you)")
+        string("mode", "Which matches to include (default: all modes)") {
+            CompareMode.entries.forEach { choice(it.title, it.option) }
+        }
+        integer("matches", "Latest completed matches per player (default: $DEFAULT_COMPARE_MATCHES)") { minValue = 5L; maxValue = 40L }
+        publicOption()
+    }
     input("profile", "Show a Deadlock profile card: rank, featured heroes and stats") {
         string("account_id", "Account ID, SteamID64, or Steam profile URL (leave blank for yours)")
     }
@@ -120,6 +132,7 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
             "lastfive" -> handleLastFive(interaction, kord, gcProvider, metadata)
             "match" -> handleMatch(interaction, gcProvider, metadata, interaction.command.strings["match_id"])
             "party" -> handleParty(interaction)
+            "compare" -> handleCompare(interaction, gcProvider, playerNames)
             "profile" -> handleProfile(interaction, gcProvider, live, playerNames)
             "status" -> handleTrackingStatus(interaction, gcProvider, metadata)
             "live" -> handleLive(interaction, gcProvider, live, playerNames)
@@ -296,7 +309,7 @@ internal fun notLiveMessage(name: String, inGame: Boolean?) = when (inGame) {
         "Players who are Steam friends with the bot (`/steambot`) also show whether they're in game."
 }
 
-private suspend fun resolveAccountInput(raw: String, onError: suspend (String) -> Unit): String? {
+internal suspend fun resolveAccountInput(raw: String, onError: suspend (String) -> Unit): String? {
     return when (val result = SteamAccountResolver().use { it.resolve(raw) }) {
         is AccountResolution.Resolved -> result.accountId
         AccountResolution.Invalid -> {
