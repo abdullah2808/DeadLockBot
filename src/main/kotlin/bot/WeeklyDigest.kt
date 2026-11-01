@@ -2,11 +2,9 @@ package bot
 
 import data.WeeklyDigestRepository
 import data.UserRepository
-import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.behavior.interaction.response.respond
-import dev.kord.core.entity.channel.TextChannel
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -65,9 +63,11 @@ internal suspend fun sendWeeklyDigests(kord: Kord, users: List<UserRepository.Us
                 } + (if (members.size > 5) "\n\n${members.size - 5} additional subscribers; use `/weekly action:preview` for your recap." else "") +
                     "\n\nObserved matches only; collection starts after opting in. Offline gaps or missing history can make this incomplete. Match start time determines its week."
             }
-            val channel = kord.getChannelOf<TextChannel>(Snowflake(channelId)) ?: continue
-            deliverWeekly(alreadySent = { false }, send = { channel.createMessage { content = text.take(2000) } },
-                remember = { WeeklyDigestRepository.markDelivered(channelId, from) })
+            val channel = deliveryChannel(kord, channelId)
+            trackingDelivery(members.map { it.accountId }) {
+                deliverWeekly(alreadySent = { false }, send = { channel.createMessage { content = text.take(2000) } },
+                    remember = { WeeklyDigestRepository.markDelivered(channelId, from) })
+            }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { println("Weekly recap delivery failed for channel $channelId; retrying on a later cycle: ${e.message}") }
     }

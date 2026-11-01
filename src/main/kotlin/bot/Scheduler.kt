@@ -9,7 +9,6 @@ import data.UserRepository
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.behavior.MessageBehavior
-import dev.kord.core.entity.channel.TextChannel
 import dev.kord.rest.request.RestRequestException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -121,16 +120,18 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                     data.WeeklyDigestRepository.record(finished.accountId, listOf(match))
 
                     try {
-                        deliverPendingMatch(
-                            finished, pending,
-                            resolveChannel = { user.channelId?.let { kord.getChannelOf<TextChannel>(Snowflake(it)) } },
-                            send = { channel ->
-                                val message = MatchMessageGenerator.generateRecentMatch(match, user.discordUser, channel, metadata)
-                                if (metadata == null && message != null) awaitMetadata(PostedNotification(finished.accountId,
-                                    finished.matchId, message.channelId.toString(), message.id.toString(), System.currentTimeMillis()))
-                            },
-                            persist = { UserRepository.updateLastMatch(finished.accountId, finished.matchId.toString()) },
-                        )
+                        trackingDelivery(listOf(finished.accountId)) {
+                            deliverPendingMatch(
+                                finished, pending,
+                                resolveChannel = { deliveryChannel(kord, user.channelId) },
+                                send = { channel ->
+                                    val message = MatchMessageGenerator.generateRecentMatch(match, user.discordUser, channel, metadata)
+                                    if (metadata == null) awaitMetadata(PostedNotification(finished.accountId,
+                                        finished.matchId, message.channelId.toString(), message.id.toString(), System.currentTimeMillis()))
+                                },
+                                persist = { UserRepository.updateLastMatch(finished.accountId, finished.matchId.toString()) },
+                            )
+                        }
                         println("Posted match ${finished.matchId} for ${finished.accountId} " +
                             "${if (metadata != null) "with" else "without"} full metadata, ${timing.sinceDiscoveryMillis(finished) / 1000}s after discovery.")
                         timing.forget(finished)
@@ -139,7 +140,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                         throw e
                     } catch (e: Exception) {
                         println("Error posting match ${finished.matchId} for ${finished.accountId}: ${e.message}")
-                        pending[finished] = (pending[finished] ?: 0) + 1
+                        recordFailedDelivery(finished, pending, retries, e)
                     }
                 }
                 TrackingRuntime.pending(pending.keys)
@@ -176,7 +177,7 @@ suspend fun startScheduler(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                 sendWeeklyDigests(kord, users)
                 ranks?.checkDue(usersByAccount.keys)?.forEach { (account, change) ->
                     val user = usersByAccount[account] ?: return@forEach
-                    announceRankChange(kord, user.channelId, user.discordUser, change)
+                    announceRankChange(kord, account, user.channelId, user.discordUser, change)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -200,13 +201,16 @@ private const val ENRICHMENT_WINDOW_MILLIS = 24 * 60 * 60_000L
 private const val MIN_WAKE_MILLIS = 5_000L
 
 /** Best effort: the new badge is already recorded, so a failed post is not retried (and never repeated). */
-private suspend fun announceRankChange(kord: Kord, channelId: String?, playerName: String, change: RankChange) {
+private suspend fun announceRankChange(kord: Kord, accountId: String, channelId: String?, playerName: String, change: RankChange) {
     try {
-        val channel = channelId?.let { kord.getChannelOf<TextChannel>(Snowflake(it)) } ?: return
         val (previous, current) = withContext(Dispatchers.IO) {
             change.previous?.let(RankRepository::describeBadge) to RankRepository.describeBadge(change.current)
         }
-        channel.createMessage { embeds = mutableListOf(LiveMessageGenerator.rankChangeEmbed(playerName, change, previous, current)) }
+        trackingDelivery(listOf(accountId)) {
+            deliveryChannel(kord, channelId).createMessage {
+                embeds = mutableListOf(LiveMessageGenerator.rankChangeEmbed(playerName, change, previous, current))
+            }
+        }
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
@@ -252,15 +256,24 @@ internal suspend fun enrichPostedNotifications(
     }
 }
 
+/**
+ * The match stays pending so it still posts once access returns, but a channel problem won't clear by the
+ * next wake, so it backs off (capped at 15 minutes) instead of collecting a Discord error every few seconds.
+ */
+internal fun recordFailedDelivery(finished: FinishedMatch, pending: MutableMap<FinishedMatch, Int>, retries: MetadataRetrySchedule, error: Exception) {
+    if (channelProblem(error) != null) deferPendingMetadata(finished, pending, retries)
+    else pending[finished] = (pending[finished] ?: 0) + 1
+}
+
 /** Keep the match pending unless an accessible channel, send and persistence all succeed. */
 internal suspend fun <C : Any> deliverPendingMatch(
     finished: FinishedMatch,
     pending: MutableMap<FinishedMatch, Int>,
-    resolveChannel: suspend () -> C?,
+    resolveChannel: suspend () -> C,
     send: suspend (C) -> Unit,
     persist: () -> Unit,
 ) {
-    val channel = requireNotNull(resolveChannel()) { "Notification channel is unavailable" }
+    val channel = resolveChannel()
     send(channel)
     persist()
     pending.remove(finished)

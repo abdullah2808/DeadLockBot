@@ -16,20 +16,28 @@ internal object TrackingRuntime {
     data class Sync(val at: Long? = null, val issue: String? = null)
     private val syncs = mutableMapOf<String, Sync>()
     private var waiting = emptyMap<String, Int>()
+    private val deliveryProblems = mutableMapOf<String, ChannelProblem>()
+    @Synchronized fun deliveryProblem(account: String, problem: ChannelProblem?) {
+        if (problem == null) deliveryProblems.remove(account) else deliveryProblems[account] = problem
+    }
+    @Synchronized fun deliveryProblem(account: String) = deliveryProblems[account]
     @Synchronized fun synced(account: String, at: Long = System.currentTimeMillis()) { syncs[account] = Sync(at) }
     @Synchronized fun failed(account: String, issue: String) { syncs[account] = Sync(syncs[account]?.at, issue) }
     @Synchronized fun get(account: String) = syncs[account] ?: Sync()
-    @Synchronized fun retain(accounts: Set<String>) { syncs.keys.retainAll(accounts); waiting = waiting.filterKeys { it in accounts } }
+    @Synchronized fun retain(accounts: Set<String>) { syncs.keys.retainAll(accounts); deliveryProblems.keys.retainAll(accounts); waiting = waiting.filterKeys { it in accounts } }
     @Synchronized fun pending(matches: Collection<FinishedMatch>) { waiting = matches.groupingBy { it.accountId }.eachCount() }
     @Synchronized fun pendingCount(account: String) = waiting[account] ?: 0
 }
 
 internal fun trackingStatusText(sync: TrackingRuntime.Sync, gc: GcTrackingDiagnostics?, gcConfigured: Boolean,
-    lastMatch: String?, unsent: Int, enrichment: Long, queue: Pair<Int, Long?>?): String = buildString {
+    lastMatch: String?, unsent: Int, enrichment: Long, queue: Pair<Int, Long?>?,
+    channelId: String? = null, deliveryProblem: ChannelProblem? = null): String = buildString {
     fun wait(ms: Long) = if (ms <= 0) "eligible now" else "in about ${(ms + 999) / 1000}s"
     append("**Your tracking status**\nSource: ${if (gcConfigured) "Steam / Deadlock GC" else "Public active feed (partial coverage)"}")
     append("\nLast successful source sync: ${sync.at?.let { "<t:${it / 1000}:R>" } ?: "No successful sync observed since this bot started"}")
     sync.issue?.let { append("\nLatest source issue: $it") }
+    channelId?.toULongOrNull()?.let { append("\nNotification channel: <#$it>") }
+    deliveryProblem?.let { append("\n⚠️ Latest delivery problem: ${channelProblemMessage(channelId, it)} $MOVE_TRACKING_HINT") }
     append("\nLast delivered match: ${lastMatch ?: "None recorded"}")
     append("\nNotifications waiting to send: $unsent\nPosted recaps waiting for full details: $enrichment")
     if (queue == null) append("\nMetadata retry queue: busy or unavailable; try again shortly")
@@ -54,7 +62,8 @@ internal suspend fun handleTrackingStatus(interaction: ChatInputCommandInteracti
                     (MatchNotificationTable.postedAt greater (System.currentTimeMillis() - 24 * 60 * 60_000L)) }.count()
             }
             trackingStatusText(TrackingRuntime.get(user.accountId), gc?.trackingDiagnostics(), gc != null,
-                user.lastMatchId, TrackingRuntime.pendingCount(user.accountId), posted, metadata?.pendingStatus(user.accountId))
+                user.lastMatchId, TrackingRuntime.pendingCount(user.accountId), posted, metadata?.pendingStatus(user.accountId),
+                user.channelId, TrackingRuntime.deliveryProblem(user.accountId))
         }
         response.respond { content = text }
     } catch (e: kotlinx.coroutines.CancellationException) { throw e }

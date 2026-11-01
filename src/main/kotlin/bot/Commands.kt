@@ -127,7 +127,7 @@ suspend fun handleCommands(kord: Kord, gcProvider: MatchHistoryProvider? = null,
                 }
             }
             "unsubscribe" -> handleUnsubscribe(interaction)
-            "recentmatch" -> handleRecentMatch(interaction, kord, gcProvider, metadata, playerNames)
+            "recentmatch" -> handleRecentMatch(interaction, gcProvider, metadata, playerNames)
             "trends" -> handleTrends(interaction)
             "lastfive" -> handleLastFive(interaction, kord, gcProvider, metadata)
             "match" -> handleMatch(interaction, gcProvider, metadata, interaction.command.strings["match_id"])
@@ -171,7 +171,19 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction, gc: M
         return
     }
 
-    // 3. Register the user and respond based on the outcome.
+    // 3. Refuse a channel that could never receive the notifications being signed up for.
+    if (UserRepository.selectUserByDiscordID(discordId) == null) {
+        val problem = signupChannelProblem(interaction.kord, interaction.channelId,
+            interaction.data.guildId.value?.let { interaction.data.appPermissions.value }, interaction.data.channel.value?.type)
+        if (problem != null) {
+            response.respond {
+                content = "⚠️ ${channelProblemMessage(channelId, problem)}\nYou weren't signed up. Fix that, or run `/signup` in a channel I can post in."
+            }
+            return
+        }
+    }
+
+    // 4. Register the user and respond based on the outcome.
     when (UserRepository.addUser(discordId, accountId, channelId, discordUser)) {
         UserRepository.SignupOutcome.REGISTERED -> {
             gc?.updateTrackedAccounts(UserRepository.getAllUsers().map { it.accountId }.toSet())
@@ -197,7 +209,7 @@ private suspend fun handleSignup(interaction: ChatInputCommandInteraction, gc: M
     }
 }
 
-private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, kord: Kord, gc: MatchHistoryProvider?, metadata: MatchMetadataService?, playerNames: PlayerNameService) {
+private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, gc: MatchHistoryProvider?, metadata: MatchMetadataService?, playerNames: PlayerNameService) {
     val response = interaction.deferEphemeralResponse()
     val accountId = resolveAccountInput(interaction.command.strings["account_id"]!!) { message ->
         response.respond { content = message }
@@ -218,9 +230,8 @@ private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, 
             return
         }
         val info = result.metadata[match.matchId] ?: fetchMetadata(match.matchId)
-        val channel = requireNotNull(kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(interaction.channelId))
         val playerName = playerNames.nameFor(accountId).asDiscordTitleText()
-        MatchMessageGenerator.generateRecentMatch(match, playerName, channel, info)
+        MatchMessageGenerator.generateRecentMatch(match, playerName, interaction.channel, info)
         response.respond { content = "✅ Fetched match `${match.matchId}` for `$accountId`." }
     } catch (e: GcHistoryPermissionException) {
         response.respond {
@@ -231,7 +242,11 @@ private suspend fun handleRecentMatch(interaction: ChatInputCommandInteraction, 
         throw e
     } catch (e: Exception) {
         println("Recent match command failed: ${e.message}")
-        response.respond { content = "I couldn't retrieve your latest match right now. Please try again later." }
+        val problem = channelProblem(e)
+        response.respond {
+            content = if (problem != null) "${channelProblemMessage(interaction.channelId.toString(), problem)} Try `/recentmatch` in a channel I can post in."
+            else "I couldn't retrieve your latest match right now. Please try again later."
+        }
     } finally {
         client.close()
     }
@@ -371,9 +386,10 @@ private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kor
             response.respond { content = notice ?: "No recent matches were found for this account." }
             return
         }
-        val channel = requireNotNull(kord.getChannelOf<dev.kord.core.entity.channel.TextChannel>(Snowflake(user.channelId.toString())))
-        MatchMessageGenerator.generateLastFive(result.matches, user.discordUser, channel, notice)
-        response.respond { content = notice ?: "✅ Fetched your recent matches." }
+        trackingDelivery(listOf(user.accountId)) {
+            MatchMessageGenerator.generateLastFive(result.matches, user.discordUser, deliveryChannel(kord, user.channelId), notice)
+        }
+        response.respond { content = lastFiveConfirmation(user.channelId, interaction.channelId.toString(), notice) }
     } catch (e: GcHistoryPermissionException) {
         response.respond {
             content = "Deadlock GC denied match access for `${user.accountId}`.\n\n${steamOnboarding(gc, user.accountId)}"
@@ -383,11 +399,20 @@ private suspend fun handleLastFive(interaction: ChatInputCommandInteraction, kor
         throw e
     } catch (e: Exception) {
         println("Last five command failed: ${e.message}")
-        response.respond { content = "I couldn't retrieve your recent matches right now. Please try again later." }
+        val problem = channelProblem(e)
+        response.respond {
+            content = if (problem != null) "`/lastfive` posts in your tracking channel, but: ${channelProblemMessage(user.channelId, problem)}\n$MOVE_TRACKING_HINT"
+            else "I couldn't retrieve your recent matches right now. Please try again later."
+        }
     } finally {
         client.close()
     }
 }
+
+/** `/lastfive` always posts in the registered channel, so a run from anywhere else has to say where it went. */
+internal fun lastFiveConfirmation(registeredChannelId: String?, commandChannelId: String, notice: String?): String =
+    if (registeredChannelId == commandChannelId) notice ?: "✅ Fetched your recent matches."
+    else listOfNotNull(notice, "✅ Posted your recent matches in <#$registeredChannelId>, your tracking channel.").joinToString("\n")
 
 internal fun parseMatchId(value: String): Long? = value.trim().removePrefix("match_id:").trim().toLongOrNull()?.takeIf { it > 0 }
 

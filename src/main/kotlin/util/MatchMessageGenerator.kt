@@ -2,10 +2,10 @@ package util
 
 import dev.kord.common.Color
 import dev.kord.core.behavior.MessageBehavior
+import dev.kord.core.behavior.channel.MessageChannelBehavior
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.behavior.edit
 import dev.kord.core.entity.Message
-import dev.kord.core.entity.channel.TextChannel
 import dev.kord.rest.builder.message.EmbedBuilder
 import models.HeroInfo
 
@@ -203,9 +203,9 @@ object MatchMessageGenerator {
     suspend fun generateRecentMatch(
         match: MatchHistoryDTO,
         userName: String?,
-        channel: TextChannel?,
+        channel: MessageChannelBehavior,
         additionalMatchInfo: MatchDTO?
-    ): Message? = channel?.createMessage {
+    ): Message = channel.createMessage {
         embeds = mutableListOf(buildRecentMatchEmbed(match, userName, additionalMatchInfo))
         matchReportButtons(listOf(match.matchId))
     }
@@ -254,10 +254,10 @@ object MatchMessageGenerator {
     suspend fun generateLastFive(
         matches: List<MatchHistoryDTO>,
         userName: String?,
-        channel: TextChannel?,
+        channel: MessageChannelBehavior,
         notice: String? = null
     ) {
-        channel?.createMessage {
+        channel.createMessage {
             embeds = mutableListOf(buildLastFiveEmbed(matches, userName, notice = notice))
             matchReportButtons(matches.take(5).map { it.matchId })
         }

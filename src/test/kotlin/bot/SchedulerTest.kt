@@ -19,10 +19,31 @@ class SchedulerTest {
     @Test
     fun `missing channel preserves pending`() = runTest {
         val pending = mutableMapOf(match to 0)
-        assertFailsWith<IllegalArgumentException> {
-            deliverPendingMatch<String>(match, pending, { null }, { fail("send") }, { fail("persist") })
+        assertFailsWith<ChannelUnavailableException> {
+            deliverPendingMatch<String>(match, pending, { throw ChannelUnavailableException(ChannelProblem.MISSING) }, { fail("send") }, { fail("persist") })
         }
         assertTrue(match in pending)
+    }
+
+    @Test
+    fun `channel problem backs off while keeping the match pending`() {
+        val pending = mutableMapOf(match to 0)
+        var now = 0L
+        val retries = MetadataRetrySchedule { now }
+        recordFailedDelivery(match, pending, retries, ChannelUnavailableException(ChannelProblem.NO_ACCESS))
+        assertEquals(1, pending[match])
+        assertFalse(retries.ready(match))
+        now = 90_000L
+        assertTrue(retries.ready(match))
+    }
+
+    @Test
+    fun `other delivery failures retry on the next wake`() {
+        val pending = mutableMapOf(match to 0)
+        val retries = MetadataRetrySchedule { 0L }
+        recordFailedDelivery(match, pending, retries, IllegalStateException("db unavailable"))
+        assertEquals(1, pending[match])
+        assertTrue(retries.ready(match))
     }
 
     @Test
