@@ -73,8 +73,11 @@ internal suspend fun sendWeeklyDigests(kord: Kord, users: List<UserRepository.Us
     }
 }
 
+/** Only a preview has anything to share; subscription changes stay between the caller and the bot. */
+internal fun weeklyResponseIsPublic(action: String?, requested: Boolean) = requested && action?.lowercase() == "preview"
+
 internal suspend fun handleWeekly(interaction: ChatInputCommandInteraction) {
-    val response = interaction.deferEphemeralResponse()
+    val response = interaction.deferWithVisibility(weeklyResponseIsPublic(interaction.command.strings["action"], interaction.requestedPublic()))
     try {
         val text = withContext(Dispatchers.IO) {
             val user = UserRepository.selectUserByDiscordID(interaction.user.id.toString())

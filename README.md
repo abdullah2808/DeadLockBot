@@ -8,7 +8,10 @@ A Kotlin Discord bot that tracks Deadlock matches and posts match recaps.
 - `/match` shows the latest match for your account linked through `/signup`.
 - `/recentmatch account_id:<id>` posts a player recap. Account IDs, SteamID64s, and numeric Steam profile URLs are accepted.
 - `/lastfive` posts the latest five matches for your linked account.
+- `/compare player:<user>` or `/compare account_id:<id>` compares two players' recent stats side by side. See [stat comparison](docs/stat-compare.md).
 - `/unsubscribe` stops automatic tracking and deletes your saved match history. See [Stored match data](#stored-match-data).
+
+`/trends`, `/party`, `/compare`, `/steambot` and `/weekly action:preview` reply privately by default. Set their `public:True` option to post the reply in the channel instead. Discord fixes a reply's visibility before the command runs, so an error from a `public:True` command, such as a reminder to `/signup`, is also visible to the channel.
 
 ### Stored match data
 
@@ -47,9 +50,9 @@ The HTML report uses hero names only and renders every participant supplied by m
 
 The design keeps Deadlock's dark, brass-and-cream styling and amber/sapphire team banners. Item category colors, upgrade-component information, disabled-property filtering and ability-scaling/upgrade-effect formatting are adapted from [Soul Ledger](https://github.com/abdullah2808/Soul-Ledger). Prices and effects use the live asset catalog; simulator investment totals are not presented as observed match stats.
 
-Startup replaces this application's complete global command list with the six commands above, automatically removing obsolete global commands. Commands registered specifically to an individual server have a separate list and need separate cleanup; commands belonging to other Discord applications are unaffected.
+Startup replaces this application's complete global command list, automatically removing obsolete global commands. Commands registered specifically to an individual server have a separate list and need separate cleanup; commands belonging to other Discord applications are unaffected.
 
-Startup also clears this application's legacy server-specific commands in server `875604309180559383`. It checks the server command list first and skips the overwrite once the list is empty. The six global commands remain available; other servers and applications are unaffected. A cleanup access error is logged and retried on the next startup without preventing the bot from running.
+Startup also clears this application's legacy server-specific commands in server `875604309180559383`. It checks the server command list first and skips the overwrite once the list is empty. The global commands remain available; other servers and applications are unaffected. A cleanup access error is logged and retried on the next startup without preventing the bot from running.
 
 Use JDK 21. Configure the existing environment variables required by `Env` and the database, then run `./gradlew run` (`.\gradlew.bat run` on Windows). Restarting the bot registers `/match`. The bot needs **Send Messages**, **Embed Links**, and **Attach Files** permissions in the posting channel.
 

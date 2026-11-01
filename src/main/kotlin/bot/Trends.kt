@@ -51,20 +51,22 @@ internal fun trendReport(input: List<TrendSample>): String {
     }
 }
 
+/** Retained history only, so this never spends a Steam or public API request. */
+internal fun storedTrendSamples(account: String): List<TrendSample> = transaction {
+    CachedPlayerMatchTable.selectAll().where { CachedPlayerMatchTable.accountId eq account }
+        .orderBy(CachedPlayerMatchTable.matchId to SortOrder.DESC).limit(40).mapNotNull { row ->
+            val id = row[CachedPlayerMatchTable.matchId]
+            MatchCacheRepository.find(account, id)?.let { TrendSample(it, MatchCacheRepository.findMetadata(id)) }
+        }
+}
+
 internal suspend fun handleTrends(interaction: ChatInputCommandInteraction) {
-    val response = interaction.deferEphemeralResponse()
+    val response = interaction.deferWithVisibility()
     try {
         val text = withContext(Dispatchers.IO) {
             val user = UserRepository.selectUserByDiscordID(interaction.user.id.toString())
                 ?: return@withContext "Use `/signup` to link your account first."
-            val rows = transaction {
-                CachedPlayerMatchTable.selectAll().where { CachedPlayerMatchTable.accountId eq user.accountId }
-                    .orderBy(CachedPlayerMatchTable.matchId to SortOrder.DESC).limit(40).mapNotNull { row ->
-                        val id = row[CachedPlayerMatchTable.matchId]
-                        MatchCacheRepository.find(user.accountId, id)?.let { TrendSample(it, MatchCacheRepository.findMetadata(id)) }
-                    }
-            }
-            trendReport(rows)
+            trendReport(storedTrendSamples(user.accountId))
         }
         response.respond { content = text }
     } catch (e: kotlinx.coroutines.CancellationException) { throw e }

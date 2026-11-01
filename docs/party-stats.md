@@ -1,6 +1,6 @@
 # Tracked teammate stats
 
-Use `/party` in the channel you registered with `/signup`. The response is private. It considers only other registered players whose tracking channel matches this channel, and uses cached summaries without Steam lookups.
+Use `/party` in the channel you registered with `/signup`. The response is private unless you set `public:True`, which posts it in that channel. It considers only other registered players whose tracking channel matches this channel, and uses cached summaries without Steam lookups.
 
 Illustrative preview:
 
