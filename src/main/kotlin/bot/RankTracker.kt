@@ -23,7 +23,8 @@ data class RankChange(val previous: Int?, val current: Int) {
 internal class RankTracker(
     private val fetch: suspend (String) -> ProfileCard?,
     private val all: () -> Map<String, RankSnapshot> = RankSnapshotRepository::all,
-    private val save: (String, RankSnapshot) -> Unit = RankSnapshotRepository::save,
+    /** Returns false if the account stopped being tracked; [checkDue]'s account set can be a whole cycle old. */
+    private val save: (String, RankSnapshot) -> Boolean = RankSnapshotRepository::saveIfTracked,
     private val clock: () -> Long = System::currentTimeMillis,
     /** The scheduler can wake every few seconds for metadata retries; rank checks need no such urgency. */
     private val minIntervalMs: Long = 30_000L,
@@ -66,10 +67,11 @@ internal class RankTracker(
                 continue
             }
             backoffUntil.remove(account)
-            val previous = snapshots[account]
+            // Read again because /unsubscribe can delete the snapshot during the fetch; a re-signup then starts a new baseline.
+            val previous = all()[account]
             val current = card.rankedBadgeLevel
             // A missing badge (hidden or not reported) keeps the last known rank rather than counting as a change.
-            save(account, RankSnapshot(current ?: previous?.badge, now))
+            if (!save(account, RankSnapshot(current ?: previous?.badge, now))) continue
             val change = if (previous != null && current != null && current != previous.badge) RankChange(previous.badge, current) else null
             if (change != null) {
                 scheduled.remove(account) // already moved; later post-match checks are unnecessary

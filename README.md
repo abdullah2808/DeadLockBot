@@ -17,11 +17,10 @@ A Kotlin Discord bot that tracks Deadlock matches and posts match recaps.
 
 The bot stores match history only for accounts signed up with `/signup`: the latest 40 matches, plus a 21-day archive for players who opted into `/weekly`.
 
-`/unsubscribe` deletes your registration, your weekly recap opt-in and archive, your saved match history, and any saved match that no other tracked player also has, including its full report data. It keeps:
+`/unsubscribe` deletes your registration, your weekly recap opt-in and archive, your last-seen rank badge, your saved match history, and any saved match that no other tracked player also has, including its full report data. It keeps:
 
 - Matches shared with another tracked player, because they still need them. Their full report data covers everyone in the match, so it includes your row until no tracked player references that match.
 - Messages already posted in Discord.
-- Your last-seen rank badge.
 - A notification still waiting for full match details, until those details arrive or for at most 24 hours.
 
 If the deletion fails, you are still unsubscribed and the reply says so. The bot retries on startup and every six hours, which also removes data left by accounts that are no longer tracked.

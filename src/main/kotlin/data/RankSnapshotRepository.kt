@@ -1,6 +1,9 @@
 package data
 
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.notInSubQuery
 import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.upsert
@@ -24,12 +27,24 @@ object RankSnapshotRepository {
         }
     }
 
-    fun save(accountId: String, snapshot: RankSnapshot): Unit = transaction {
-        RankSnapshotTable.upsert {
+    /**
+     * Returns false without writing if the account is no longer tracked. Locking the user's row makes an
+     * unsubscribe wait for this save, so its cleanup always runs afterwards and removes what was written.
+     */
+    fun saveIfTracked(accountId: String, snapshot: RankSnapshot): Boolean = transaction {
+        val tracked = !UserTable.select(UserTable.accountId).where { UserTable.accountId eq accountId }.forUpdate().empty()
+        if (tracked) RankSnapshotTable.upsert {
             it[RankSnapshotTable.accountId] = accountId
             it[badge] = snapshot.badge
             it[checkedAt] = snapshot.checkedAt
         }
+        tracked
+    }
+
+    fun deleteAccount(account: String): Unit = transaction { RankSnapshotTable.deleteWhere { accountId eq account }; Unit }
+
+    fun deleteUntracked(): Unit = transaction {
+        RankSnapshotTable.deleteWhere { accountId notInSubQuery UserTable.select(UserTable.accountId) }
         Unit
     }
 }

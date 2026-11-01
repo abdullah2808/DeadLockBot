@@ -4,7 +4,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
 
 enum class UnsubscribeOutcome { NOT_SIGNED_UP, DATA_DELETED, CLEANUP_PENDING }
 
-/** Stored match data follows tracking status: it exists only for accounts in `tracked_users`. */
+/** Stored match data and rank badges follow tracking status: they exist only for accounts in `tracked_users`. */
 object TrackedAccountData {
     /**
      * Tracking stops first, in its own transaction, so a failed cleanup never keeps anyone subscribed.
@@ -18,6 +18,7 @@ object TrackedAccountData {
                 WeeklyDigestRepository.disable(discordId)
                 WeeklyDigestRepository.deleteAccount(account)
                 MatchCacheRepository.deleteAccount(account)
+                RankSnapshotRepository.deleteAccount(account)
             }
             UnsubscribeOutcome.DATA_DELETED
         } catch (e: Exception) {
@@ -30,5 +31,6 @@ object TrackedAccountData {
     fun sweepUntracked(): Unit = transaction {
         WeeklyDigestRepository.deleteUntracked()
         MatchCacheRepository.deleteUntracked()
+        RankSnapshotRepository.deleteUntracked()
     }
 }

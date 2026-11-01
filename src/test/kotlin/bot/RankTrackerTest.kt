@@ -19,14 +19,14 @@ class RankTrackerTest {
             ProfileCard(account.toLong(), badges[account], emptyList())
         },
         all = { snapshots.toMap() },
-        save = { account, snapshot -> snapshots[account] = snapshot },
+        save = { account, snapshot -> snapshots[account] = snapshot; true },
         clock = { now },
         minIntervalMs = 0,
     )
 
     @Test
     fun `checks run at most once per interval`() = runTest {
-        val paced = RankTracker({ fetched += it; null }, { emptyMap() }, { _, _ -> }, { now })
+        val paced = RankTracker({ fetched += it; null }, { emptyMap() }, { _, _ -> true }, { now })
         paced.checkDue(setOf("1"))
         now += 5_000
         paced.checkDue(setOf("2"))
@@ -82,6 +82,12 @@ class RankTrackerTest {
         snapshots["2"] = RankSnapshot(null, 0)
         badges["2"] = 31
         assertEquals(RankChange.Direction.PLACED, tracker.checkDue(setOf("2")).single().second.direction)
+    }
+
+    @Test
+    fun `a refused save announces nothing even if an old snapshot survived`() = runTest {
+        val refusing = RankTracker({ ProfileCard(it.toLong(), 60, emptyList()) }, { mapOf("1" to RankSnapshot(54, 0)) }, { _, _ -> false }, { now }, 0)
+        assertTrue(refusing.checkDue(setOf("1")).isEmpty())
     }
 
     @Test

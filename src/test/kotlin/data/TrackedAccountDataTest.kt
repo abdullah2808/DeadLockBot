@@ -6,6 +6,9 @@ import api.gc.CachedMatchHistoryProvider
 import api.gc.GcMetadataDownload
 import api.gc.MatchHistoryProvider
 import api.gc.MatchHistorySnapshot
+import api.gc.ProfileCard
+import bot.RankChange
+import bot.RankTracker
 import bot.unsubscribeMessage
 import kotlinx.coroutines.test.runTest
 import models.MatchDTO
@@ -15,12 +18,13 @@ import models.Players
 import models.toMatchHistory
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
+import kotlin.concurrent.thread
 import kotlin.test.*
 
 class TrackedAccountDataTest {
     private fun setup() {
         Database.connect("jdbc:h2:mem:tracked-${System.nanoTime()};DB_CLOSE_DELAY=-1", driver = "org.h2.Driver")
-        transaction { SchemaUtils.create(UserTable, CachedMatchTable, CachedPlayerMatchTable, WeeklySettingsTable, WeeklyMatchTable) }
+        transaction { SchemaUtils.create(UserTable, CachedMatchTable, CachedPlayerMatchTable, WeeklySettingsTable, WeeklyMatchTable, RankSnapshotTable) }
     }
     private fun track(account: String) = UserRepository.addUser("discord-$account", account, "channel", "Player $account")
     private fun metadata(id: Long, vararg accounts: Int) = MatchDTO(MatchInfoDTO(matchId = id, startTime = 123, durationSeconds = 1800,
@@ -115,6 +119,120 @@ class TrackedAccountDataTest {
         assertTrue("deleted your saved match history" in unsubscribeMessage(UnsubscribeOutcome.DATA_DELETED))
         assertTrue("couldn't delete" in unsubscribeMessage(UnsubscribeOutcome.CLEANUP_PENDING))
         assertFalse("deleted" in unsubscribeMessage(UnsubscribeOutcome.NOT_SIGNED_UP))
+    }
+
+    /** The default repository wiring, as the scheduler builds it; [onFetch] runs while the profile card is in flight. */
+    private fun rankTracker(badge: () -> Int?, onFetch: () -> Unit = {}): RankTracker {
+        var now = 0L
+        return RankTracker({ onFetch(); ProfileCard(it.toLong(), badge(), emptyList()) }, clock = { now += RankTracker.REFRESH_MS; now }, minIntervalMs = 0)
+    }
+
+    @Test fun `unsubscribe deletes only that account's rank snapshot`() {
+        setup()
+        track("107"); track("208")
+        RankSnapshotRepository.saveIfTracked("107", RankSnapshot(54, 1))
+        RankSnapshotRepository.saveIfTracked("208", RankSnapshot(31, 1))
+
+        assertEquals(UnsubscribeOutcome.DATA_DELETED, TrackedAccountData.unsubscribe("discord-107"))
+
+        assertEquals(mapOf("208" to RankSnapshot(31, 1)), RankSnapshotRepository.all())
+    }
+
+    @Test fun `failed cleanup keeps the rank snapshot until the sweep removes it`() {
+        setup()
+        track("107"); track("208")
+        RankSnapshotRepository.saveIfTracked("107", RankSnapshot(54, 1))
+        RankSnapshotRepository.saveIfTracked("208", RankSnapshot(31, 1))
+        transaction { SchemaUtils.drop(WeeklyMatchTable) }
+
+        assertEquals(UnsubscribeOutcome.CLEANUP_PENDING, TrackedAccountData.unsubscribe("discord-107"))
+        assertEquals(setOf("107", "208"), RankSnapshotRepository.all().keys) // rolled back with the rest of the cleanup
+
+        transaction { SchemaUtils.create(WeeklyMatchTable) }
+        TrackedAccountData.sweepUntracked()
+
+        assertEquals(setOf("208"), RankSnapshotRepository.all().keys)
+    }
+
+    @Test fun `sweep removes rank snapshots left by accounts no longer tracked`() {
+        setup()
+        track("208")
+        RankSnapshotRepository.saveIfTracked("208", RankSnapshot(31, 1))
+        transaction {
+            RankSnapshotTable.insert { it[accountId] = "999"; it[badge] = 54; it[checkedAt] = 1 }
+        }
+
+        TrackedAccountData.sweepUntracked()
+
+        assertEquals(mapOf("208" to RankSnapshot(31, 1)), RankSnapshotRepository.all())
+    }
+
+    @Test fun `re-signing up records a silent baseline instead of comparing with the old badge`() = runTest {
+        setup()
+        track("107")
+        var badge = 54
+        val tracker = rankTracker({ badge })
+        assertTrue(tracker.checkDue(setOf("107")).isEmpty())
+        assertEquals(54, RankSnapshotRepository.all()["107"]?.badge)
+
+        TrackedAccountData.unsubscribe("discord-107")
+        track("107")
+        badge = 60
+
+        assertTrue(tracker.checkDue(setOf("107")).isEmpty())
+        assertEquals(60, RankSnapshotRepository.all()["107"]?.badge)
+
+        // The new baseline is live: the next real change is announced against it.
+        badge = 61
+        assertEquals("107" to RankChange(60, 61), tracker.checkDue(setOf("107")).single())
+    }
+
+    @Test fun `a rank check in flight during unsubscribe does not write the snapshot back`() = runTest {
+        setup()
+        track("107")
+        RankSnapshotRepository.saveIfTracked("107", RankSnapshot(54, 0))
+        val tracker = rankTracker({ 60 }, onFetch = { TrackedAccountData.unsubscribe("discord-107") })
+
+        assertTrue(tracker.checkDue(setOf("107")).isEmpty())
+
+        assertEquals(emptyMap(), RankSnapshotRepository.all())
+    }
+
+    @Test fun `a check started from a stale account list stores nothing for an unsubscribed player`() = runTest {
+        setup()
+        track("107")
+        TrackedAccountData.unsubscribe("discord-107")
+
+        assertTrue(rankTracker({ 60 }).checkDue(setOf("107")).isEmpty()) // the cycle read its users before the unsubscribe
+
+        assertEquals(emptyMap(), RankSnapshotRepository.all())
+    }
+
+    @Test fun `unsubscribing and re-signing during a rank check still gives a silent baseline`() = runTest {
+        setup()
+        track("107")
+        RankSnapshotRepository.saveIfTracked("107", RankSnapshot(54, 0))
+        val tracker = rankTracker({ 60 }, onFetch = { TrackedAccountData.unsubscribe("discord-107"); track("107") })
+
+        assertTrue(tracker.checkDue(setOf("107")).isEmpty())
+
+        assertEquals(60, RankSnapshotRepository.all()["107"]?.badge)
+    }
+
+    @Test fun `an unsubscribe waits for a save in progress and then removes it`() {
+        setup()
+        track("107")
+        lateinit var unsubscribing: Thread
+        transaction {
+            assertTrue(RankSnapshotRepository.saveIfTracked("107", RankSnapshot(54, 1)))
+            unsubscribing = thread { TrackedAccountData.unsubscribe("discord-107") }
+            // Hold the save open long enough for the unsubscribe to reach the locked row.
+            Thread.sleep(300)
+        }
+        unsubscribing.join()
+
+        assertFalse(UserRepository.isTracked("107"))
+        assertEquals(emptyMap(), RankSnapshotRepository.all())
     }
 
     /** A Steam stub wired to the real repositories the way Main wires them. */
