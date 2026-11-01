@@ -3,6 +3,9 @@ package models
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+@Serializable
+data class PlayerRankDTO(val badge: Int = 0)
+
 /**
  * A player entry within a live match from `/v1/matches/active`.
  * `account_id` is a uint32 that can exceed Int range, so it is modelled as [Long].

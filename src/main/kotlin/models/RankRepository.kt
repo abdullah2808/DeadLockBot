@@ -24,6 +24,24 @@ data class RankBadge(val name: String, val subrank: Int, val image: String?) {
     val label get() = if (subrank in 1..6) "$name $subrank" else name
 }
 
+data class MatchRanks(val overall: Int?, val team0: Int?, val team1: Int?)
+
+/**
+ * Valve's team averages were 0 in the real ranked matches checked, so prefer averaging the players' own badges.
+ * Badges aren't linear (116 is followed by 121), so average their position on the ladder instead.
+ */
+fun matchRanks(info: MatchInfoDTO): MatchRanks {
+    fun average(players: List<Players>, reported: Int): Int? {
+        val ladder = players.mapNotNull { it.rankData?.initialDisplayRank }.filter { it / 10 > 0 && it % 10 in 1..6 }
+            .map { (it / 10) * 6 + it % 10 - 1 }
+        if (ladder.isEmpty()) return reported.takeIf { it > 0 }
+        val position = (ladder.sum() + ladder.size / 2) / ladder.size
+        return (position / 6) * 10 + position % 6 + 1
+    }
+    return MatchRanks(average(info.players, 0), average(info.players.filter { it.team == 0 }, info.averageBadgeTeam0),
+        average(info.players.filter { it.team == 1 }, info.averageBadgeTeam1))
+}
+
 object RankRepository {
     private val catalog = AssetCatalog(load = {
         assetJson.decodeFromString<List<Rank>>(readAssetCatalog("ranks")).associateBy { it.tier }
@@ -31,9 +49,10 @@ object RankRepository {
 
 
     fun getRankImage(matchHistory: MatchHistoryDTO, additionalMatchInfo: MatchDTO?): String? {
+        val ranks = additionalMatchInfo?.matchInfo?.let(::matchRanks)
         val avgTeamRank = when (matchHistory.playerTeam) {
-            1 -> additionalMatchInfo?.matchInfo?.averageBadgeTeam1 ?: 0
-            0 -> additionalMatchInfo?.matchInfo?.averageBadgeTeam0 ?: 0
+            1 -> ranks?.team1 ?: 0
+            0 -> ranks?.team0 ?: 0
             else -> 0
         }
         val rank = catalog.get(avgTeamRank / 10) ?: return null

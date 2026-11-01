@@ -21,6 +21,7 @@ import kotlinx.serialization.json.Json
 import models.ActiveMatchDTO
 import models.MatchDTO
 import models.MatchHistoryDTO
+import models.PlayerRankDTO
 
 class DeadlockClient(
     private val client: HttpClient = defaultHttpClient(),
@@ -157,6 +158,20 @@ class DeadlockClient(
      * 300 with a key), which is separate from this bot's GC budget. Throws [MetadataDeferredException] while paced.
      */
     suspend fun getMatchFromSteam(matchId: Long): MatchDTO? = metadataGate.requestFromSteam(matchId) { fetchMetadata(matchId, steam = true) }
+
+    /** The badge Valve reported after the player's latest ranked match; 0 means no rank, null means unavailable. */
+    suspend fun getPlayerRank(accountId: String): Int? = try {
+        val response = client.get("https://api.deadlock-api.com/v1/players/$accountId/rank") {
+            apiKey?.let { header("X-API-Key", it) }
+        }
+        if (response.status.isSuccess()) response.body<PlayerRankDTO>().badge
+        else { println("Rank unavailable for $accountId (HTTP ${response.status.value})."); null }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        println("Error fetching rank for $accountId: ${e.message}")
+        null
+    }
 
     private suspend fun fetchMetadata(matchId: Long, steam: Boolean): MatchDTO? {
         val url = "https://api.deadlock-api.com/v1/matches/$matchId/metadata"

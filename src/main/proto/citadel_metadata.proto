@@ -10,6 +10,13 @@ message CMsgMatchMetaData {
     optional uint64 match_id = 3;
 }
 
+message CMsgMatchPlayerRankData {
+    optional uint32 initial_display_rank = 1; // tier * 10 + subrank
+    optional uint32 initial_flat_progress = 2;
+    optional uint32 final_flat_progress = 3;
+    optional bool consumed_demotion_protection = 8;
+}
+
 message CMsgMatchMetaDataContents {
     message Deaths {
         optional uint32 game_time_s = 1;
@@ -49,6 +56,7 @@ message CMsgMatchMetaDataContents {
         optional uint32 denies = 14;
         optional uint32 level = 18;
         optional uint32 abandon_match_time_s = 23;
+        optional CMsgMatchPlayerRankData player_rank_data = 32;
     }
     message MatchInfo {
         optional uint32 duration_s = 1;

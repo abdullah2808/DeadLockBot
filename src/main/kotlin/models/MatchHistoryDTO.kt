@@ -25,5 +25,9 @@ data class MatchHistoryDTO(
     @SerialName("start_time") val startTime: Int,
     @SerialName("abandoned_time_s") val abandonedTimeSeconds: Int? = null,
     @SerialName("team_abandoned") val teamAbandoned: Boolean? = null,
-    val username: String? = null
+    val username: String? = null,
+    @SerialName("ranked_display_badge") val rankedDisplayBadge: Int? = null,
+    @SerialName("ranked_delta") val rankedDelta: Int? = null,
+    @SerialName("ranked_calibration_match") val rankedCalibrationMatch: Int? = null,
+    @SerialName("ranked_used_demotion_protection") val rankedUsedDemotionProtection: Boolean? = null,
 )

@@ -38,6 +38,10 @@ object CachedPlayerMatchTable : Table("cached_player_matches") {
     val denies = integer("denies")
     val abandonedTime = integer("abandoned_time_s").nullable()
     val teamAbandoned = bool("team_abandoned").nullable()
+    val rankedDisplayBadge = integer("ranked_display_badge").nullable()
+    val rankedDelta = integer("ranked_delta").nullable()
+    val rankedCalibrationMatch = integer("ranked_calibration_match").nullable()
+    val rankedUsedDemotionProtection = bool("ranked_used_demotion_protection").nullable()
     override val primaryKey = PrimaryKey(accountId, matchId)
 }
 
@@ -82,6 +86,10 @@ object MatchCacheRepository {
                 it[denies] = match.denies
                 it[abandonedTime] = match.abandonedTimeSeconds
                 it[teamAbandoned] = match.teamAbandoned
+                it[rankedDisplayBadge] = match.rankedDisplayBadge
+                it[rankedDelta] = match.rankedDelta
+                it[rankedCalibrationMatch] = match.rankedCalibrationMatch
+                it[rankedUsedDemotionProtection] = match.rankedUsedDemotionProtection
             }
         }
         val excess = CachedPlayerMatchTable.selectAll().where { CachedPlayerMatchTable.accountId eq account }
@@ -110,6 +118,10 @@ object MatchCacheRepository {
                 deaths = row[CachedPlayerMatchTable.deaths], kills = row[CachedPlayerMatchTable.kills],
                 playerTeam = row[CachedPlayerMatchTable.team], startTime = row[CachedMatchTable.startTime],
                 abandonedTimeSeconds = row[CachedPlayerMatchTable.abandonedTime], teamAbandoned = row[CachedPlayerMatchTable.teamAbandoned],
+                rankedDisplayBadge = row[CachedPlayerMatchTable.rankedDisplayBadge],
+                rankedDelta = row[CachedPlayerMatchTable.rankedDelta],
+                rankedCalibrationMatch = row[CachedPlayerMatchTable.rankedCalibrationMatch],
+                rankedUsedDemotionProtection = row[CachedPlayerMatchTable.rankedUsedDemotionProtection],
             )
         }
     }

@@ -5,6 +5,7 @@ import gc.citadel.CitadelMetadata.CMsgMatchMetaData
 import gc.citadel.CitadelMetadata.CMsgMatchMetaDataContents
 import models.MatchDTO
 import models.MatchInfoDTO
+import models.PlayerRankData
 import models.Players
 import models.Stats
 import models.MatchItem
@@ -46,6 +47,12 @@ internal fun decodeValveMetadata(bytes: ByteArray, matchId: Long, maxDecodedByte
             heroLevel = player.level,
             abandonedTimeSeconds = player.abandonMatchTimeS.takeIf { player.hasAbandonMatchTimeS() },
             playerSlot = player.playerSlot,
+            rankData = player.playerRankData.takeIf { player.hasPlayerRankData() }?.let { rank -> PlayerRankData(
+                rank.initialDisplayRank.takeIf { rank.hasInitialDisplayRank() },
+                rank.initialFlatProgress.takeIf { rank.hasInitialFlatProgress() },
+                rank.finalFlatProgress.takeIf { rank.hasFinalFlatProgress() },
+                rank.consumedDemotionProtection.takeIf { rank.hasConsumedDemotionProtection() },
+            ) },
             deathDetails = player.deathDetailsList.map { death -> MatchDeath(
                 death.gameTimeS.takeIf { death.hasGameTimeS() },
                 death.killerPlayerSlot.takeIf { death.hasKillerPlayerSlot() },
