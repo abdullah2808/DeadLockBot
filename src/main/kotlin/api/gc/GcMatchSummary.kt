@@ -26,5 +26,9 @@ internal fun Match.toSummary(accountId: String): MatchHistoryDTO? {
         playerTeam = playerTeam, startTime = startTime,
         abandonedTimeSeconds = abandonedTimeS.takeIf { hasAbandonedTimeS() },
         teamAbandoned = teamAbandoned.takeIf { hasTeamAbandoned() },
+        rankedDisplayBadge = rankedDisplayBadge.takeIf { hasRankedDisplayBadge() },
+        rankedDelta = rankedDelta.takeIf { hasRankedDelta() },
+        rankedCalibrationMatch = rankedCalibrationMatch.takeIf { hasRankedCalibrationMatch() },
+        rankedUsedDemotionProtection = rankedUsedDemotionProtection.takeIf { hasRankedUsedDemotionProtection() },
     )
 }

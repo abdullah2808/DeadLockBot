@@ -20,6 +20,8 @@ object LiveMessageGenerator {
         card: ProfileCard,
         rank: RankBadge?,
         heroName: (Int) -> String = HeroRepository::getHeroName,
+        badge: Int? = card.rankedBadgeLevel,
+        rankFromLastMatch: Boolean = false,
     ) = EmbedBuilder().apply {
         title = "$playerName • Deadlock profile"
         color = Color(0x9B59B6)
@@ -27,10 +29,10 @@ object LiveMessageGenerator {
         description = buildString {
             append("**Rank:** ")
             appendLine(when {
-                card.rankedBadgeLevel == null -> "Unranked or hidden"
+                badge == null -> "Unranked or hidden"
                 rank != null -> rank.label
-                else -> "Badge ${card.rankedBadgeLevel}"
-            })
+                else -> "Badge $badge"
+            } + if (badge != null && rankFromLastMatch) " (as of their latest ranked match)" else "")
             val stats = listOfNotNull(
                 card.gamesPlayed?.let { "**Games:** ${it.formatted()}" },
                 card.wins?.let { "**Wins:** ${it.formatted()}" },

@@ -14,6 +14,14 @@ data class Stats (
 )
 
 @Serializable
+data class PlayerRankData(
+    @SerialName("initial_display_rank") val initialDisplayRank: Int? = null,
+    @SerialName("initial_flat_progress") val initialFlatProgress: Int? = null,
+    @SerialName("final_flat_progress") val finalFlatProgress: Int? = null,
+    @SerialName("consumed_demotion_protection") val consumedDemotionProtection: Boolean? = null,
+)
+
+@Serializable
 data class Players (
     @SerialName("account_id") val accountId: Int,
     @SerialName("stats") val stats: List<Stats> = emptyList(),
@@ -33,6 +41,7 @@ data class Players (
     val items: List<MatchItem>? = null,
     val name: String? = null,
     @SerialName("death_details") val deathDetails: List<MatchDeath>? = null,
+    @SerialName("player_rank_data") val rankData: PlayerRankData? = null,
 ) {
     val finalStats: Stats? get() = stats.asReversed().maxByOrNull { it.timeStampSeconds }
     val finalItems: List<MatchItem> get() = items.orEmpty()

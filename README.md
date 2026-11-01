@@ -25,6 +25,8 @@ Progression preserves recorded event order and times, including sold items. Abil
 
 Player names are used if metadata supplies them; otherwise the scoreboard displays account IDs. Missing damage/healing stats display `—`. Hero and item images use the public Deadlock assets API, with cached images and fallbacks during outages. If full match metadata is unavailable or still processing, the command explains this instead of producing an incomplete scoreboard. Metadata cached by older bot versions may lack inventory; those rows show `Unavailable` for items.
 
+Ranked and placement notifications, `/recentmatch` and match buttons also show the player's rank after the match with their progress change, plus the match average and each team's average once full metadata arrives. Valve's own team averages were 0 in the real ranked matches checked, so the averages come from each player's rank on entering the match. `/profile` uses Valve's profile card and falls back to the public API, labelled as of the player's latest ranked match, when the card has no rank.
+
 Automatic notifications include result colors, hero thumbnails, K/D/A, souls per minute, farming stats, damage and support stats when available, and a command to open the full scoreboard. The scheduler records a notification as delivered after Discord accepts the message.
 
 ## Run and verify

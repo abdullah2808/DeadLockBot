@@ -15,6 +15,7 @@ import java.util.Locale
 import kotlin.time.Instant
 import models.MatchDTO
 import models.RankRepository
+import models.matchRanks
 
 object MatchMessageGenerator {
 
@@ -76,6 +77,38 @@ object MatchMessageGenerator {
         runCatching { RankRepository.getRankImage(match, details) }.getOrNull()
             ?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
 
+    private fun rankLabel(badge: Int): String =
+        runCatching { RankRepository.describeBadge(badge)?.label }.getOrNull() ?: "Badge $badge"
+
+    /** Null outside ranked play. Match averages need full metadata, so they appear when the post is enriched. */
+    internal fun rankSummary(match: MatchHistoryDTO, details: MatchDTO?, rankName: (Int) -> String): String? {
+        if (!MatchModes.affectsRank(match.gameMode, match.matchMode)) return null
+        val own = details?.matchInfo?.players?.firstOrNull { it.accountId == match.accountId }?.rankData
+        val delta = match.rankedDelta ?: own?.let { rank ->
+            rank.finalFlatProgress?.let { end -> rank.initialFlatProgress?.let { start -> end - start } }
+        }
+        val progress = delta?.let { " (%+,d progress)".format(Locale.US, it) }.orEmpty()
+        val after = match.rankedDisplayBadge?.takeIf { it > 0 }
+        val entered = own?.initialDisplayRank?.takeIf { it > 0 }
+        val player = when {
+            after != null -> "**${rankName(after)}** after this match$progress"
+            entered != null -> "Entered at **${rankName(entered)}**$progress"
+            (match.rankedCalibrationMatch ?: 0) != 0 -> "Placement match"
+            else -> null
+        }
+        val protection = "Demotion protection used".takeIf {
+            match.rankedUsedDemotionProtection == true || own?.consumedDemotionProtection == true
+        }
+        val ranks = details?.matchInfo?.let(::matchRanks)
+        val teams = listOfNotNull(ranks?.team0?.let { "Amber ${rankName(it)}" }, ranks?.team1?.let { "Sapphire ${rankName(it)}" }).joinToString(" · ")
+        val average = when {
+            ranks?.overall != null -> "Match average: **${rankName(ranks.overall)}**" + if (teams.isEmpty()) "" else " ($teams)"
+            teams.isNotEmpty() -> "Team averages: $teams"
+            else -> null
+        }
+        return listOfNotNull(player, protection, average).joinToString("\n").ifBlank { null }
+    }
+
     private fun number(value: Int?): String = value?.let { String.format(Locale.US, "%,d", it) } ?: "—"
 
     private fun duration(match: MatchHistoryDTO): String {
@@ -94,7 +127,8 @@ object MatchMessageGenerator {
         userName: String?,
         additionalMatchInfo: MatchDTO?,
         heroLookup: (Int) -> HeroInfo = ::heroInfo,
-        rankLookup: (MatchHistoryDTO, MatchDTO?) -> String? = ::rankImage
+        rankName: (Int) -> String = ::rankLabel,
+        rankLookup: (MatchHistoryDTO, MatchDTO?) -> String? = ::rankImage,
     ): EmbedBuilder {
         val hero = heroLookup(match.heroId)
         val finalStats = additionalMatchInfo?.matchInfo?.players
@@ -143,6 +177,13 @@ object MatchMessageGenerator {
                     value = "**${number(stats.playerHealing)}** healing\n" +
                         "**${number(stats.damageAbsorbed)}** absorbed"
                     inline = true
+                }
+            }
+            rankSummary(match, additionalMatchInfo, rankName)?.let { summary ->
+                field {
+                    name = "🏅 Rank"
+                    value = summary
+                    inline = false
                 }
             }
             field {

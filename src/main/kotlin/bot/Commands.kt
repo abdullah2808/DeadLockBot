@@ -244,6 +244,13 @@ private suspend fun requestedOrLinkedAccount(interaction: ChatInputCommandIntera
         ?: run { onError("Provide an `account_id`, or use `/signup` to link your account."); null }
 }
 
+internal data class ProfileRank(val badge: Int?, val fromLastMatch: Boolean)
+
+/** Valve's profile card can omit the rank; the public API reports it as of the latest ranked match, with 0 for none. */
+internal suspend fun resolveProfileRank(cardBadge: Int?, publicBadge: suspend () -> Int?): ProfileRank =
+    if (cardBadge != null) ProfileRank(cardBadge, false)
+    else publicBadge()?.takeIf { it > 0 }?.let { ProfileRank(it, true) } ?: ProfileRank(null, false)
+
 private suspend fun handleProfile(interaction: ChatInputCommandInteraction, gc: MatchHistoryProvider?,
                                   live: LiveMatchService, playerNames: PlayerNameService) {
     val response = interaction.deferPublicResponse()
@@ -258,9 +265,17 @@ private suspend fun handleProfile(interaction: ChatInputCommandInteraction, gc: 
             response.respond { content = "I couldn't load the profile card for `$accountId` right now. Please try again shortly." }
             return
         }
-        val rank = card.rankedBadgeLevel?.let { badge -> withContext(Dispatchers.IO) { RankRepository.describeBadge(badge) } }
+        val profileRank = resolveProfileRank(card.rankedBadgeLevel) {
+            println("GC profile card for $accountId has no rank; asking the public API.")
+            val client = DeadlockClient()
+            try { client.getPlayerRank(accountId) } finally { client.close() }
+        }
+        val rank = profileRank.badge?.let { badge -> withContext(Dispatchers.IO) { RankRepository.describeBadge(badge) } }
         val name = playerNames.nameFor(accountId).asDiscordTitleText()
-        response.respond { embeds = mutableListOf(LiveMessageGenerator.profileEmbed(name, card, rank)) }
+        response.respond {
+            embeds = mutableListOf(LiveMessageGenerator.profileEmbed(name, card, rank,
+                badge = profileRank.badge, rankFromLastMatch = profileRank.fromLastMatch))
+        }
     } catch (e: CancellationException) {
         throw e
     } catch (e: GcRateLimitedException) {

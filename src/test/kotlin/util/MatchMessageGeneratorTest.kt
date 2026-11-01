@@ -87,7 +87,7 @@ class MatchMessageGeneratorTest {
     @Test
     fun `notifications and last five show the match mode`() {
         val ranked = match().copy(matchMode = 4)
-        assertContains(MatchMessageGenerator.buildRecentMatchEmbed(ranked, "P", null, { HeroInfo("Haze", null) }, { _, _ -> null }).description!!, "🏅 Ranked")
+        assertContains(MatchMessageGenerator.buildRecentMatchEmbed(ranked, "P", null, { HeroInfo("Haze", null) }) { _, _ -> null }.description!!, "🏅 Ranked")
         val brawl = match().copy(gameMode = 4, matchId = 2)
         val lastFive = MatchMessageGenerator.buildLastFiveEmbed(listOf(ranked, brawl), "P", { HeroInfo("Haze", null) })
         assertContains(lastFive.fields[0].name, "🏅 Ranked")
