@@ -5,6 +5,7 @@ import gc.citadel.CitadelLive
 import gc.citadel.CitadelMatchHistory
 import `in`.dragonbra.javasteam.base.ClientMsgProtobuf
 import `in`.dragonbra.javasteam.base.gc.ClientGCMsgProtobuf
+import `in`.dragonbra.javasteam.enums.EClientPersonaStateFlag
 import `in`.dragonbra.javasteam.enums.EMsg
 import `in`.dragonbra.javasteam.enums.EResult
 import `in`.dragonbra.javasteam.enums.EFriendRelationship
@@ -14,6 +15,7 @@ import `in`.dragonbra.javasteam.steam.authentication.UserConsoleAuthenticator
 import `in`.dragonbra.javasteam.steam.handlers.steamfriends.SteamFriends
 import `in`.dragonbra.javasteam.steam.handlers.steamfriends.callback.FriendsListCallback
 import `in`.dragonbra.javasteam.steam.handlers.steamfriends.callback.FriendAddedCallback
+import `in`.dragonbra.javasteam.steam.handlers.steamfriends.callback.PersonaStateCallback
 import `in`.dragonbra.javasteam.steam.handlers.steamgamecoordinator.SteamGameCoordinator
 import `in`.dragonbra.javasteam.steam.handlers.steamgamecoordinator.callback.MessageCallback
 import `in`.dragonbra.javasteam.steam.handlers.steamuser.LogOnDetails
@@ -24,6 +26,7 @@ import `in`.dragonbra.javasteam.steam.steamclient.SteamClient
 import `in`.dragonbra.javasteam.steam.steamclient.callbackmgr.CallbackManager
 import `in`.dragonbra.javasteam.steam.steamclient.callbacks.ConnectedCallback
 import `in`.dragonbra.javasteam.steam.steamclient.callbacks.DisconnectedCallback
+import `in`.dragonbra.javasteam.steam.steamclient.configuration.SteamConfiguration
 import `in`.dragonbra.javasteam.types.JobID
 import `in`.dragonbra.javasteam.types.SteamID
 import kotlinx.coroutines.CompletableDeferred
@@ -39,6 +42,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermissions
+import java.util.EnumSet
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 
@@ -85,6 +89,7 @@ class GcClient(
     private val tokenFile: File = File("steam_refresh_token.txt"),
     private val autoAcceptFriends: Boolean = true,
     private val metadataBudget: GcMetadataBudget = GcMetadataBudget(),
+    richPresenceProbe: Boolean = false,
 ) : MatchHistoryProvider {
     private companion object {
         const val DEADLOCK_APP_ID = 1422450
@@ -102,7 +107,12 @@ class GcClient(
         const val UNANSWERED_COOLDOWN_MS = 30 * 60_000L
         const val REQUEST_TIMEOUT_MS = 20_000L
     }
-    private val steamClient = SteamClient()
+    // JavaSteam's default persona flags leave rich presence out, so only the probe asks for it.
+    private val personaFlagsWithRichPresence = EnumSet.copyOf(SteamConfiguration.createDefault().defaultPersonaStateFlags)
+        .apply { add(EClientPersonaStateFlag.RichPresence) }
+    private val steamClient = if (richPresenceProbe) SteamClient(SteamConfiguration.create {
+        it.withDefaultPersonaStateFlags(personaFlagsWithRichPresence)
+    }) else SteamClient()
     private val manager = CallbackManager(steamClient)
     private val steamUser = requireNotNull(steamClient.getHandler(SteamUser::class.java))
     private val steamFriends = requireNotNull(steamClient.getHandler(SteamFriends::class.java))
@@ -113,6 +123,8 @@ class GcClient(
         steamFriends.addFriend(SteamID(76561197960265728L + account.toLong()))
         println("Steam bot: accepting incoming friend request from $account.")
     })
+    @Volatile private var trackedAccounts = emptySet<String>()
+    private val probe = if (richPresenceProbe) RichPresenceProbe({ it in trackedAccounts && friendPolicy.status(it) == SteamFriendship.FRIEND }) else null
     @Volatile private var running = false
     @Volatile private var connected = false
     @Volatile private var gcWelcomed = false
@@ -146,9 +158,36 @@ class GcClient(
             friendPolicy.confirm(callback.steamID.accountID.toString(), callback.result == EResult.OK)
             println("Steam bot: friend acceptance for ${callback.steamID.accountID}: ${callback.result}.")
         }
+        probe?.let(::startRichPresenceProbe)
         thread(name = "steam-gc-callbacks", isDaemon = true) {
             steamClient.connect()
-            while (running) manager.runWaitCallbacks(1000L)
+            while (running) {
+                manager.runWaitCallbacks(1000L)
+                probe?.let(::pollRichPresence)
+            }
+        }
+    }
+
+    private fun startRichPresenceProbe(probe: RichPresenceProbe) {
+        println("Rich presence probe is on: logging tracked Steam friends' rich presence. Turn it off after testing.")
+        manager.subscribe(PersonaStateCallback::class.java) { callback ->
+            if (callback.friendId.isIndividualAccount) probe.observe("persona", callback.friendId.accountID.toString(),
+                callback.richPresence.map { it.key to it.value }, callback.gamePlayedAppId)
+        }
+        steamClient.addHandler(RichPresenceInfoHandler(probe))
+    }
+
+    /** Asks Steam both ways, because which one answers a bot account is what the probe is for. */
+    private fun pollRichPresence(probe: RichPresenceProbe) {
+        if (!connected || !probe.pollDue()) return
+        try {
+            val friends = trackedAccounts.filter { playingDeadlock(it) == true }.map { SteamID(76561197960265728L + it.toLong()) }
+            probe.polling(friends.size)
+            if (friends.isEmpty()) return
+            steamFriends.requestFriendInfo(friends, EClientPersonaStateFlag.code(personaFlagsWithRichPresence))
+            steamClient.send(richPresenceRequest(DEADLOCK_APP_ID, friends.map { it.convertToUInt64() }))
+        } catch (e: Exception) {
+            println("Rich presence probe: could not send a request (${e.javaClass.simpleName}).")
         }
     }
     override fun close() {
@@ -169,7 +208,10 @@ class GcClient(
     }
     override fun autoAcceptFriendsEnabled() = autoAcceptFriends
     override fun authorizeSignupFriendRequest(accountId: String) = friendPolicy.authorizeSignup(accountId)
-    override fun updateTrackedAccounts(accounts: Set<String>) = friendPolicy.updateTracked(accounts)
+    override fun updateTrackedAccounts(accounts: Set<String>) {
+        trackedAccounts = accounts.toSet()
+        friendPolicy.updateTracked(accounts)
+    }
     override suspend fun recentMatchIds(accountId: String): List<Long> = recentHistory(accountId).ids
 
     override suspend fun recentHistory(accountId: String): MatchHistorySnapshot {
